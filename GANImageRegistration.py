@@ -1,8 +1,8 @@
 from __future__ import print_function, division
 
-from tensorflow.contrib.image import dense_image_warp
-import keras.backend as K
+#from tensorflow.contrib.image import dense_image_warp
 
+import keras.backend as K
 from keras.datasets import mnist
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
@@ -17,9 +17,16 @@ from keras.optimizers import RMSprop, Adam
 from keras.models import Model
 from keras.utils import to_categorical
 
-from functools import partial
+from tensorflow.python.framework import constant_op
+from tensorflow.python.framework import dtypes
+from tensorflow.python.framework import ops
+
+from tensorflow.python.ops import array_ops
+from tensorflow.python.ops import check_ops
+from tensorflow.python.ops import math_ops
 
 import matplotlib.pyplot as plt
+from functools import partial
 import numpy as np
 import scipy
 import sys
@@ -59,7 +66,7 @@ class GANImageRegistration:
         phi = self.generator([img_S, img_T])
 
         # warp the subject image
-        warped_S = Lambda(self.warp)(img_S, phi)
+        warped_S = Lambda(self.dense_image_warp_3D)(img_S, phi)
 
         # Use Python partial to provide loss function with additional deformable field argument
         partial_gp_loss = partial(self.gradient_penalty_loss,
@@ -234,12 +241,172 @@ class GANImageRegistration:
         return score
 
 
-    # Wrapper over dense_image_warp function in tensor flow to use in Lambda layer in Keras
-    def warp(self,img, flow):
-        # deformable_field (flow) 24x24x24
-        # subject_image (img) 64x64x64
-        # return should be warped image 24x24x24 #fixme
-        # This use bilinear interpolation --> not intended for 3D image
-        warped_image = dense_image_warp(image=img, flow=flow)
+    # This ise tf and will be wrapped to be used in Lambda layer in Keras
+    def dense_image_warp_3D(self, image, flow, name='dense_image_warp'):
+        """Image warping using per-pixel flow vectors.
 
-        return warped_image
+        Apply a non-linear warp to the image, where the warp is specified by a dense
+        flow field of offset vectors that define the correspondences of pixel values
+        in the output image back to locations in the  source image. Specifically, the
+        pixel value at output[b, j, i, k, c] is
+        images[b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2], c].
+        The locations specified by this formula do not necessarily map to an int
+        index. Therefore, the pixel value is obtained by trilinear
+        interpolation of the 8 nearest pixels around
+        (b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2]). For locations outside
+        of the image, we use the nearest pixel values at the image boundary.
+        Args:
+          image: 5-D float `Tensor` with shape `[batch, height, width, depth, channels]`.
+          flow: A 5-D float `Tensor` with shape `[batch, height, width, depth, 3]`.
+          name: A name for the operation (optional).
+          Note that image and flow can be of type tf.half, tf.float32, or tf.float64,
+          and do not necessarily have to be the same type.
+        Returns:
+          A 5-D float `Tensor` with shape`[batch, height, width, depth, channels]`
+            and same type as input image.
+        Raises:
+          ValueError: if height < 2 or width < 2 or the inputs have the wrong number
+                      of dimensions.
+        """
+
+        batch_size, height, width, depth, channels = (array_ops.shape(image)[0],
+                                                    array_ops.shape(image)[1],
+                                                    array_ops.shape(image)[2],
+                                                    array_ops.shape(image)[3],
+                                                    array_ops.shape(image)[4])
+
+        # The flow is defined on the image grid. Turn the flow into a list of query
+        # points in the grid space.
+        grid_x, grid_y, grid_z = array_ops.meshgrid(
+            math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+        stacked_grid = math_ops.cast(
+            array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+        batched_grid = array_ops.expand_dims(stacked_grid, axis=0)
+        query_points_on_grid = batched_grid - flow
+        query_points_flattened = array_ops.reshape(query_points_on_grid,
+                                                   [batch_size, height * width * depth, 3])
+        # Compute values at the query points, then reshape the result back to the
+        # image grid.
+        interpolated = self.interpolate_trilinear(image, query_points_flattened)
+        interpolated = array_ops.reshape(interpolated,
+                                         [batch_size, height, width, depth, channels])
+        return interpolated
+
+
+
+    def interpolate_trilinear(self, grid, query_points, name='interpolate_trilinear', indexing='ijk'):
+        """Similar to Matlab's interp2 function but for 3D.
+        Finds values for query points on a grid using trilinear interpolation.
+        Args:
+            grid: a 5-D float `Tensor` of shape `[batch, height, width, depth, channels]`.
+            query_points: a 3-D float `Tensor` of N points with shape `[batch, N, 3]`.
+            name: a name for the operation (optional).
+            indexing: whether the query points are specified as row and column (ijk),
+                or Cartesian coordinates (xyz).
+        Returns:
+            values: a 3-D `Tensor` with shape `[batch, N, channels]`
+        Raises:
+            ValueError: if the indexing mode is invalid, or if the shape of the inputs
+                invalid.
+        """
+
+        if indexing != 'ij' and indexing != 'xy':
+            raise ValueError('Indexing mode must be \'ij\' or \'xy\'')
+
+        with ops.name_scope(name):
+            grid = ops.convert_to_tensor(grid)
+            query_points = ops.convert_to_tensor(query_points)
+            shape = array_ops.unstack(array_ops.shape(grid))
+            if len(shape) != 5:
+                msg = 'Grid must be 5 dimensional. Received: '
+                raise ValueError(msg + str(shape))
+
+            batch_size, height, width, depth, channels = shape
+            query_type = query_points.dtype
+            query_shape = array_ops.unstack(array_ops.shape(query_points))
+            grid_type = grid.dtype
+
+            if len(query_shape) != 3:
+                msg = ('Query points must be 3 dimensional. Received: ')
+                raise ValueError(msg + str(query_shape))
+
+            _, num_queries, _ = query_shape
+
+            alphas = []
+            floors = []
+            ceils = []
+
+            index_order = [0, 1, 2] if indexing == 'ijk' else [2, 1, 0]
+            unstacked_query_points = array_ops.unstack(query_points, axis=3)
+
+            for dim in index_order:
+                with ops.name_scope('dim-' + str(dim)):
+                    queries = unstacked_query_points[dim]
+
+                    size_in_indexing_dimension = shape[dim + 1] # because batch size is the first index in shape
+
+                    # max_floor is size_in_indexing_dimension - 2 so that max_floor + 1
+                    # is still a valid index into the grid.
+                    max_floor = math_ops.cast(size_in_indexing_dimension - 2, query_type)
+                    min_floor = constant_op.constant(0.0, dtype=query_type)
+                    floor = math_ops.minimum(
+                        math_ops.maximum(min_floor, math_ops.floor(queries)), max_floor)
+                    int_floor = math_ops.cast(floor, dtypes.int32)
+                    floors.append(int_floor)
+                    ceil = int_floor + 1
+                    ceils.append(ceil)
+
+                    # alpha has the same type as the grid, as we will directly use alpha
+                    # when taking linear combinations of pixel values from the image.
+                    alpha = math_ops.cast(queries - floor, grid_type)
+                    min_alpha = constant_op.constant(0.0, dtype=grid_type)
+                    max_alpha = constant_op.constant(1.0, dtype=grid_type)
+                    alpha = math_ops.minimum(math_ops.maximum(min_alpha, alpha), max_alpha)
+
+                    # Expand alpha to [b, n, 1] so we can use broadcasting
+                    # (since the alpha values don't depend on the channel).
+                    alpha = array_ops.expand_dims(alpha, 2)
+                    alphas.append(alpha)
+
+            flattened_grid = array_ops.reshape(grid,
+                                               [batch_size * height * width * depth, channels])
+            batch_offsets = array_ops.reshape(
+                math_ops.range(batch_size) * height * width * depth, [batch_size, 1])
+
+            # This wraps array_ops.gather. We reshape the image data such that the
+            # batch, y, x and z coordinates are pulled into the first dimension.
+            # Then we gather. Finally, we reshape the output back. It's possible this
+            # code would be made simpler by using array_ops.gather_nd.
+            def gather(y_coords, x_coords, z_coords, name):
+                with ops.name_scope('gather-' + name):
+                    # map a 3d coordinates to a single number
+                    linear_coordinates = batch_offsets + y_coords * width + x_coords * height + z_coords * depth
+                    gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
+                    return array_ops.reshape(gathered_values,
+                                             [batch_size, num_queries, channels])
+
+            # grab the pixel values in the 8 corners around each query point
+            # coordinates: y x z (rows(height), columns(width), depth)      # yxz
+            fy_fx_fz = gather(floors[0], floors[1], floors[2], 'fy_fx_fz')  # 000
+            fy_fx_cz = gather(floors[0], floors[1], ceils[2], 'fy_fx_cz')   # 001
+            fy_cx_fz = gather(floors[0], ceils[1], floors[2], 'fy_cx_fz')   # 010
+            fy_cx_cz = gather(floors[0], ceils[1], ceils[2], 'fy_cx_cz')    # 011
+            cy_fx_fz = gather(ceils[0], floors[1], floors[2], 'cy_fx_fz')   # 100
+            cy_fx_cz = gather(ceils[0], floors[1], ceils[2], 'cy_fx_cz')    # 101
+            cy_cx_fz = gather(ceils[0], ceils[1], floors[2], 'cy_cx_fz')    # 110
+            cy_cx_cz = gather(ceils[0], ceils[1], ceils[2], 'cy_cx_cz')     # 111
+
+            # now, do the actual interpolation
+            with ops.name_scope('interpolate'):
+                # we perform 4 linear interpolation to compute a, b, c, and d using alpha[1],
+                # then we compute e and f by interpolating a, b, c and d  using alpha[0],
+                # and finally we find our sample point by interpolating e and f using alpha[2]
+                a = alpha[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
+                b = alpha[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
+                c = alpha[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
+                d = alpha[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
+                e = alpha[0] * (b - a) + a
+                f = alpha[0] * (d - c) + c
+                g = alpha[2] * (f - e) + e
+
+            return g
