@@ -65,8 +65,10 @@ class GANImageRegistration:
         # By conditioning on T generate a warped transformation of S
         phi = self.generator([img_S, img_T])
 
-        # warp the subject image
-        warped_S = Lambda(self.dense_image_warp_3D)(img_S, phi)
+        # warp the subject image # TODO: maybe put this in the generator network to evaluate the gradient on it as well
+        img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
+        # Put the warping function in a Lambda layer because it uses tensorflow
+        warped_S = Lambda(self.dense_image_warp_3D)(img_S_downsampled, phi)
 
         # Use Python partial to provide loss function with additional deformable field argument
         partial_gp_loss = partial(self.gradient_penalty_loss,
@@ -310,8 +312,8 @@ class GANImageRegistration:
                 invalid.
         """
 
-        if indexing != 'ij' and indexing != 'xy':
-            raise ValueError('Indexing mode must be \'ij\' or \'xy\'')
+        if indexing != 'ijk' and indexing != 'xyz':
+            raise ValueError('Indexing mode must be \'ijk\' or \'xyz\'')
 
         with ops.name_scope(name):
             grid = ops.convert_to_tensor(grid)
@@ -322,9 +324,11 @@ class GANImageRegistration:
                 raise ValueError(msg + str(shape))
 
             batch_size, height, width, depth, channels = shape
+            grid_type = grid.dtype
+
             query_type = query_points.dtype
             query_shape = array_ops.unstack(array_ops.shape(query_points))
-            grid_type = grid.dtype
+
 
             if len(query_shape) != 3:
                 msg = ('Query points must be 3 dimensional. Received: ')
@@ -337,7 +341,7 @@ class GANImageRegistration:
             ceils = []
 
             index_order = [0, 1, 2] if indexing == 'ijk' else [2, 1, 0]
-            unstacked_query_points = array_ops.unstack(query_points, axis=3)
+            unstacked_query_points = array_ops.unstack(query_points, axis=2)
 
             for dim in index_order:
                 with ops.name_scope('dim-' + str(dim)):
