@@ -198,13 +198,6 @@ class GANImageRegistration:
     """
     Define losses
     """
-    # def discriminator_loss(self,y_true,y_pred):
-    #     if y_true == 0: #fake (negative case: images are not well registered)
-    #         score = K.log(y_pred)
-    #     else: # real (positive case: well registered images)
-    #         score = K.log(1-y_pred)
-    #     return score
-
     def gradient_penalty_loss(self, y_true, y_pred, phi):
         """
         Computes gradient penalty on phi to ensure smoothness
@@ -213,9 +206,10 @@ class GANImageRegistration:
             lr = -K.log(1-y_pred) # negative sign because the loss should be a positive value
         else:
             lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
-        #  Get the numerical gradient of phi by putting variables as 1
-        x = K.variable([1])
-        gradients = K.gradients(phi, x)[0] #FIXME: grandients return None: need to implement the numerical gradient
+
+        # compute the numerical gradient of phi
+        gradients = self.numerical_gradient_3D(phi)
+
         # compute the euclidean norm by squaring ...
         gradients_sqr = K.square(gradients)
         #   ... summing over the rows ...
@@ -226,24 +220,53 @@ class GANImageRegistration:
         # compute lambda * (1 - ||grad||)^2 still for each single sample
         gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
-        return K.mean(gradient_penalty)
+        return K.mean(gradient_penalty) + lr
 
 
-    def registration_loss(self, y_true, y_pred):
-        if y_true == 0:
-            lr = -K.log(1-y_pred)  # negative because the loss has to be positive vaue
-        else:
-            lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
+    """
+    Define numerical gradient
+    """
+    def numerical_gradient_3D(self, phi):
+        """ Calculate the numerical gradient of a tensor
+        similar to Matlab gradient(F)
+        This implementation only considers neighbors in the same dim
+        TODO: take the gradient across the 8 neighbors of the voxel
+        Args:
+            phi: 5D tensor (b, j, i, k, c)
+        Return:
+            G: numerical gradient -  same dimension as phi: 5D tensor
+        """
+        _, Nx, Ny, Nz, _ = phi.shape.as_list()
+        # ... calculates the central difference for interior data points --> like Matlab: gradient(F)
+        # G(:,j) = 0.5*(A(:,j+1) - A(:,j-1));
+        Gy_c = 0.5 * (phi[:, 2:, :, :, :] - phi[:, :-2, :, :, :])  # (b, 22, 24, 24, 1)
+        Gx_c = 0.5 * (phi[:, :, 2:, :, :] - phi[:, :, :-2, :, :])  # (b, 22 23, 24, 1)
+        Gz_c = 0.5 * (phi[:, :, :, 2:, :] - phi[:, :, :, :-2, :])  # (b, 22, 24, 23, 1)
 
-        # smoothness term
-        reg_lambda = 1
-        lreg = reg_lambda * 1 #TODO add lreg (np.gradient) which is the gradient loss
-        score = lr + lreg
+        # ... calculate values along the edges of the matrix with single-sides differences
+        Gy_N = phi[:, Nx - 1:Nx, :, :, :] - phi[:, Nx - 2:Nx - 1, :, :, :]
+        Gy_0 = phi[:, 1:2, :, :, :] - phi[:, 0:1, :, :, :]
 
-        return score
+        Gx_N = phi[:, :, Ny - 1:Ny, :, :] - phi[:, :, Ny - 2:Ny - 1, :, :]
+        Gx_0 = phi[:, :, 1:2, :, :] - phi[:, :, 0:1, :, :]
 
+        Gz_N = phi[:, :, :, Nz - 1:Nz, :] - phi[:, :, :, Nz - 2:Nz - 1, :]
+        Gz_0 = phi[:, :, :, 1:2, :] - phi[:, :, :, 0:1, :]
 
-    # This ise tf and will be wrapped to be used in Lambda layer in Keras
+        # ... concatenate the edge differences with the central differences
+        Gy = K.concatenate([Gy_0, Gy_c, Gy_N], axis=1)
+        Gx = K.concatenate([Gx_0, Gx_c, Gx_N], axis=2)
+        Gz = K.concatenate([Gz_0, Gz_c, Gz_N], axis=3)
+
+        # ... then add the partial gradients
+        G = Gx + Gy + Gz
+
+        return G
+
+    """
+    Define image warping 
+    """
+    # This use tf and will be wrapped to be used in Lambda layer in Keras
     def dense_image_warp_3D(self, image, flow, name='dense_image_warp'):
         """Image warping using per-pixel flow vectors.
 
