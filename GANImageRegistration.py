@@ -1,9 +1,6 @@
 from __future__ import print_function, division
 
-#from tensorflow.contrib.image import dense_image_warp
-
 import keras.backend as K
-from keras.datasets import mnist
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
 from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate, concatenate
@@ -12,14 +9,9 @@ from keras.layers import Lambda
 from keras.layers.advanced_activations import LeakyReLU, ReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D
 
-from keras.optimizers import RMSprop, Adam
+from keras.optimizers import Adam
 
 from keras.models import Model
-from keras.utils import to_categorical
-
-from tensorflow.python.framework import constant_op
-from tensorflow.python.framework import dtypes
-from tensorflow.python.framework import ops
 
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import check_ops
@@ -31,6 +23,10 @@ import numpy as np
 import scipy
 import sys
 
+from helpers import interpolate_trilinear, numerical_gradient_3D
+
+
+__author__ = 'elmalakis'
 
 
 class GANImageRegistration:
@@ -57,22 +53,23 @@ class GANImageRegistration:
         # Build the generator
         self.generator = self.build_generator()
 
+        # Build the deformable transformation layer
+        self.transformation = self.build_transformation()
+
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
         img_T = Input(shape=self.input_shape_g) # template image T
         img_R = Input(shape=self.input_shape_d) # reference image R
 
-        # By conditioning on T generate a warped transformation of S
+        # By conditioning on T generate a warped transformation function of S
         phi = self.generator([img_S, img_T])
 
-        # warp the subject image # TODO: maybe put this in the generator network to evaluate the gradient on it as well
-        img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
-        # Put the warping function in a Lambda layer because it uses tensorflow
-        warped_S = Lambda(self.dense_image_warp_3D)(img_S_downsampled, phi)
+        # Transform S
+        warped_S = self.transformation([img_S, phi])
 
         # Use Python partial to provide loss function with additional deformable field argument
         partial_gp_loss = partial(self.gradient_penalty_loss,
-                          phi=phi)
+                                  phi=phi)
         partial_gp_loss.__name__ = 'gradient_penalty' # Keras requires function names
 
         # For the combined model we will only train the generator
@@ -82,10 +79,8 @@ class GANImageRegistration:
         valid = self.discriminator([warped_S, img_R])
 
         self.combined = Model(inputs=[img_S, img_T], outputs=valid)
-        self.combined.compile(loss=self.partial_gp_loss,
-                              #loss_weights=[1, 100],
+        self.combined.compile(loss=partial_gp_loss,
                               optimizer=optimizer)
-
 
     """
     Generator Network
@@ -114,11 +109,11 @@ class GANImageRegistration:
 
 
         input_shape = self.input_shape_g
-        inputs_S = Input(shape=input_shape)  # 64x64x64
-        inputs_T = Input(shape=input_shape)  # 64x64x64
+        img_S = Input(shape=input_shape)  # 64x64x64
+        img_T = Input(shape=input_shape)  # 64x64x64
 
         # Concatenate subject image and template image by channels to produce input
-        combined_imgs = Concatenate(axis=-1)([inputs_S, inputs_T])
+        combined_imgs = Concatenate(axis=-1)([img_S, img_T])
 
         # down-sampling
         down1 = g_layer(input_tensor=combined_imgs, n_filters=self.gf, padding='valid')  # 62x62x62
@@ -146,12 +141,12 @@ class GANImageRegistration:
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
         phi = Conv3D(filters=1, kernel_size=(1, 1, 1), use_bias=False)(up1)  # 24x24x24
 
-        model = Model(inputs=combined_imgs, outputs=phi)
+        model = Model([img_S, img_T], outputs=phi)
 
         return model
 
     """
-    Descriminator Network
+    Discriminator Network
     """
     def build_discriminator(self):
 
@@ -188,11 +183,17 @@ class GANImageRegistration:
 
 
     """
-    Deformable transformation layer
+    Deformable Transformation Layer    
     """
-    def deformable_transformation_layer(self, deformable_field, subject_image):
-        # TODO: trilinear interpolation
-        return subject_image
+    def build_transformation(self):
+        img_S = Input(shape=self.input_shape_g)  # 64x64x64
+        phi = Input(shape=self.input_shape_d)    # 24x24x24
+
+        img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
+        # Put the warping function in a Lambda layer because it uses tensorflow
+        warped_S = Lambda(self.dense_image_warp_3D)(img_S_downsampled, phi) # 24x24x24
+
+        return Model([img_S, phi], warped_S)
 
 
     """
@@ -208,7 +209,7 @@ class GANImageRegistration:
             lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
 
         # compute the numerical gradient of phi
-        gradients = self.numerical_gradient_3D(phi)
+        gradients = numerical_gradient_3D(phi)
 
         # compute the euclidean norm by squaring ...
         gradients_sqr = K.square(gradients)
@@ -223,45 +224,7 @@ class GANImageRegistration:
         return K.mean(gradient_penalty) + lr
 
 
-    """
-    Define numerical gradient
-    """
-    def numerical_gradient_3D(self, phi):
-        """ Calculate the numerical gradient of a tensor
-        similar to Matlab gradient(F)
-        This implementation only considers neighbors in the same dim
-        TODO: take the gradient across the 8 neighbors of the voxel
-        Args:
-            phi: 5D tensor (b, j, i, k, c)
-        Return:
-            G: numerical gradient -  same dimension as phi: 5D tensor
-        """
-        _, Nx, Ny, Nz, _ = phi.shape.as_list()
-        # ... calculates the central difference for interior data points --> like Matlab: gradient(F)
-        # G(:,j) = 0.5*(A(:,j+1) - A(:,j-1));
-        Gy_c = 0.5 * (phi[:, 2:, :, :, :] - phi[:, :-2, :, :, :])  # (b, 22, 24, 24, 1)
-        Gx_c = 0.5 * (phi[:, :, 2:, :, :] - phi[:, :, :-2, :, :])  # (b, 22 23, 24, 1)
-        Gz_c = 0.5 * (phi[:, :, :, 2:, :] - phi[:, :, :, :-2, :])  # (b, 22, 24, 23, 1)
 
-        # ... calculate values along the edges of the matrix with single-sides differences
-        Gy_N = phi[:, Nx - 1:Nx, :, :, :] - phi[:, Nx - 2:Nx - 1, :, :, :]
-        Gy_0 = phi[:, 1:2, :, :, :] - phi[:, 0:1, :, :, :]
-
-        Gx_N = phi[:, :, Ny - 1:Ny, :, :] - phi[:, :, Ny - 2:Ny - 1, :, :]
-        Gx_0 = phi[:, :, 1:2, :, :] - phi[:, :, 0:1, :, :]
-
-        Gz_N = phi[:, :, :, Nz - 1:Nz, :] - phi[:, :, :, Nz - 2:Nz - 1, :]
-        Gz_0 = phi[:, :, :, 1:2, :] - phi[:, :, :, 0:1, :]
-
-        # ... concatenate the edge differences with the central differences
-        Gy = K.concatenate([Gy_0, Gy_c, Gy_N], axis=1)
-        Gx = K.concatenate([Gx_0, Gx_c, Gx_N], axis=2)
-        Gz = K.concatenate([Gz_0, Gz_c, Gz_N], axis=3)
-
-        # ... then add the partial gradients
-        G = Gx + Gy + Gz
-
-        return G
 
     """
     Define image warping 
@@ -312,128 +275,7 @@ class GANImageRegistration:
                                                    [batch_size, height * width * depth, 3])
         # Compute values at the query points, then reshape the result back to the
         # image grid.
-        interpolated = self.interpolate_trilinear(image, query_points_flattened)
+        interpolated = interpolate_trilinear(image, query_points_flattened)
         interpolated = array_ops.reshape(interpolated,
                                          [batch_size, height, width, depth, channels])
         return interpolated
-
-
-
-    def interpolate_trilinear(self, grid, query_points, name='interpolate_trilinear', indexing='ijk'):
-        """Similar to Matlab's interp2 function but for 3D.
-        Finds values for query points on a grid using trilinear interpolation.
-        Args:
-            grid: a 5-D float `Tensor` of shape `[batch, height, width, depth, channels]`.
-            query_points: a 3-D float `Tensor` of N points with shape `[batch, N, 3]`.
-            name: a name for the operation (optional).
-            indexing: whether the query points are specified as row and column (ijk),
-                or Cartesian coordinates (xyz).
-        Returns:
-            values: a 3-D `Tensor` with shape `[batch, N, channels]`
-        Raises:
-            ValueError: if the indexing mode is invalid, or if the shape of the inputs
-                invalid.
-        """
-
-        if indexing != 'ijk' and indexing != 'xyz':
-            raise ValueError('Indexing mode must be \'ijk\' or \'xyz\'')
-
-        with ops.name_scope(name):
-            grid = ops.convert_to_tensor(grid)
-            query_points = ops.convert_to_tensor(query_points)
-            shape = array_ops.unstack(array_ops.shape(grid))
-            if len(shape) != 5:
-                msg = 'Grid must be 5 dimensional. Received: '
-                raise ValueError(msg + str(shape))
-
-            batch_size, height, width, depth, channels = shape
-            grid_type = grid.dtype
-
-            query_type = query_points.dtype
-            query_shape = array_ops.unstack(array_ops.shape(query_points))
-
-
-            if len(query_shape) != 3:
-                msg = ('Query points must be 3 dimensional. Received: ')
-                raise ValueError(msg + str(query_shape))
-
-            _, num_queries, _ = query_shape
-
-            alphas = []
-            floors = []
-            ceils = []
-
-            index_order = [0, 1, 2] if indexing == 'ijk' else [2, 1, 0]
-            unstacked_query_points = array_ops.unstack(query_points, axis=2)
-
-            for dim in index_order:
-                with ops.name_scope('dim-' + str(dim)):
-                    queries = unstacked_query_points[dim]
-
-                    size_in_indexing_dimension = shape[dim + 1] # because batch size is the first index in shape
-
-                    # max_floor is size_in_indexing_dimension - 2 so that max_floor + 1
-                    # is still a valid index into the grid.
-                    max_floor = math_ops.cast(size_in_indexing_dimension - 2, query_type)
-                    min_floor = constant_op.constant(0.0, dtype=query_type)
-                    floor = math_ops.minimum(
-                        math_ops.maximum(min_floor, math_ops.floor(queries)), max_floor)
-                    int_floor = math_ops.cast(floor, dtypes.int32)
-                    floors.append(int_floor)
-                    ceil = int_floor + 1
-                    ceils.append(ceil)
-
-                    # alpha has the same type as the grid, as we will directly use alpha
-                    # when taking linear combinations of pixel values from the image.
-                    alpha = math_ops.cast(queries - floor, grid_type)
-                    min_alpha = constant_op.constant(0.0, dtype=grid_type)
-                    max_alpha = constant_op.constant(1.0, dtype=grid_type)
-                    alpha = math_ops.minimum(math_ops.maximum(min_alpha, alpha), max_alpha)
-
-                    # Expand alpha to [b, n, 1] so we can use broadcasting
-                    # (since the alpha values don't depend on the channel).
-                    alpha = array_ops.expand_dims(alpha, 2)
-                    alphas.append(alpha)
-
-            flattened_grid = array_ops.reshape(grid,
-                                               [batch_size * height * width * depth, channels])
-            batch_offsets = array_ops.reshape(
-                math_ops.range(batch_size) * height * width * depth, [batch_size, 1])
-
-            # This wraps array_ops.gather. We reshape the image data such that the
-            # batch, y, x and z coordinates are pulled into the first dimension.
-            # Then we gather. Finally, we reshape the output back. It's possible this
-            # code would be made simpler by using array_ops.gather_nd.
-            def gather(y_coords, x_coords, z_coords, name):
-                with ops.name_scope('gather-' + name):
-                    # map a 3d coordinates to a single number
-                    linear_coordinates = batch_offsets + y_coords * width + x_coords * height + z_coords * depth
-                    gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
-                    return array_ops.reshape(gathered_values,
-                                             [batch_size, num_queries, channels])
-
-            # grab the pixel values in the 8 corners around each query point
-            # coordinates: y x z (rows(height), columns(width), depth)      # yxz
-            fy_fx_fz = gather(floors[0], floors[1], floors[2], 'fy_fx_fz')  # 000
-            fy_fx_cz = gather(floors[0], floors[1], ceils[2], 'fy_fx_cz')   # 001
-            fy_cx_fz = gather(floors[0], ceils[1], floors[2], 'fy_cx_fz')   # 010
-            fy_cx_cz = gather(floors[0], ceils[1], ceils[2], 'fy_cx_cz')    # 011
-            cy_fx_fz = gather(ceils[0], floors[1], floors[2], 'cy_fx_fz')   # 100
-            cy_fx_cz = gather(ceils[0], floors[1], ceils[2], 'cy_fx_cz')    # 101
-            cy_cx_fz = gather(ceils[0], ceils[1], floors[2], 'cy_cx_fz')    # 110
-            cy_cx_cz = gather(ceils[0], ceils[1], ceils[2], 'cy_cx_cz')     # 111
-
-            # now, do the actual interpolation
-            with ops.name_scope('interpolate'):
-                # we perform 4 linear interpolation to compute a, b, c, and d using alpha[1],
-                # then we compute e and f by interpolating a, b, c and d  using alpha[0],
-                # and finally we find our sample point by interpolating e and f using alpha[2]
-                a = alpha[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
-                b = alpha[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
-                c = alpha[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
-                d = alpha[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
-                e = alpha[0] * (b - a) + a
-                f = alpha[0] * (d - c) + c
-                g = alpha[2] * (f - e) + e
-
-            return g
