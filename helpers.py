@@ -177,3 +177,61 @@ def numerical_gradient_3D(phi):
     G = Gx + Gy + Gz
 
     return G
+
+
+"""
+Define image warping 
+"""
+# This use tf and will be wrapped to be used in Lambda layer in Keras
+def dense_image_warp_3D(tensors, name='dense_image_warp'):
+    """Image warping using per-pixel flow vectors.
+
+    Apply a non-linear warp to the image, where the warp is specified by a dense
+    flow field of offset vectors that define the correspondences of pixel values
+    in the output image back to locations in the  source image. Specifically, the
+    pixel value at output[b, j, i, k, c] is
+    images[b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2], c].
+    The locations specified by this formula do not necessarily map to an int
+    index. Therefore, the pixel value is obtained by trilinear
+    interpolation of the 8 nearest pixels around
+    (b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2]). For locations outside
+    of the image, we use the nearest pixel values at the image boundary.
+    Args:
+      image: 5-D float `Tensor` with shape `[batch, height, width, depth, channels]`.
+      flow: A 5-D float `Tensor` with shape `[batch, height, width, depth, 3]`.
+      name: A name for the operation (optional).
+      Note that image and flow can be of type tf.half, tf.float32, or tf.float64,
+      and do not necessarily have to be the same type.
+    Returns:
+      A 5-D float `Tensor` with shape`[batch, height, width, depth, channels]`
+        and same type as input image.
+    Raises:
+      ValueError: if height < 2 or width < 2 or the inputs have the wrong number
+                  of dimensions.
+    """
+
+    image = tensors[0]
+    flow = tensors[1]
+
+    batch_size, height, width, depth, channels = (array_ops.shape(image)[0],
+                                                array_ops.shape(image)[1],
+                                                array_ops.shape(image)[2],
+                                                array_ops.shape(image)[3],
+                                                array_ops.shape(image)[4])
+
+    # The flow is defined on the image grid. Turn the flow into a list of query
+    # points in the grid space.
+    grid_x, grid_y, grid_z = array_ops.meshgrid(
+        math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+    stacked_grid = math_ops.cast(
+        array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+    batched_grid = array_ops.expand_dims(stacked_grid, axis=0)
+    query_points_on_grid = batched_grid - flow
+    query_points_flattened = array_ops.reshape(query_points_on_grid,
+                                               [batch_size, height * width * depth, 3])
+    # Compute values at the query points, then reshape the result back to the
+    # image grid.
+    interpolated = interpolate_trilinear(image, query_points_flattened)
+    interpolated = array_ops.reshape(interpolated,
+                                     [batch_size, height, width, depth, channels])
+    return interpolated
