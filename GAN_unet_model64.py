@@ -23,13 +23,13 @@ import numpy as np
 import scipy
 import sys
 
-from helpers import interpolate_trilinear, numerical_gradient_3D
+from .helpers import dense_image_warp_3D, numerical_gradient_3D
 
 
 __author__ = 'elmalakis'
 
 
-class GANImageRegistration:
+class GANUnetModel64:
     def __init__(self):
         self.crop_size_g = (64, 64, 64)
         self.crop_size_d = (24, 24, 24)
@@ -78,7 +78,7 @@ class GANImageRegistration:
         # Discriminators determines validity of translated images / condition pairs
         valid = self.discriminator([warped_S, img_R])
 
-        self.combined = Model(inputs=[img_S, img_T], outputs=valid)
+        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=valid)
         self.combined.compile(loss=partial_gp_loss,
                               optimizer=optimizer)
 
@@ -191,7 +191,7 @@ class GANImageRegistration:
 
         img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
         # Put the warping function in a Lambda layer because it uses tensorflow
-        warped_S = Lambda(self.dense_image_warp_3D)(img_S_downsampled, phi) # 24x24x24
+        warped_S = Lambda(dense_image_warp_3D)([img_S_downsampled, phi]) # 24x24x24
 
         return Model([img_S, phi], warped_S)
 
@@ -226,56 +226,3 @@ class GANImageRegistration:
 
 
 
-    """
-    Define image warping 
-    """
-    # This use tf and will be wrapped to be used in Lambda layer in Keras
-    def dense_image_warp_3D(self, image, flow, name='dense_image_warp'):
-        """Image warping using per-pixel flow vectors.
-
-        Apply a non-linear warp to the image, where the warp is specified by a dense
-        flow field of offset vectors that define the correspondences of pixel values
-        in the output image back to locations in the  source image. Specifically, the
-        pixel value at output[b, j, i, k, c] is
-        images[b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2], c].
-        The locations specified by this formula do not necessarily map to an int
-        index. Therefore, the pixel value is obtained by trilinear
-        interpolation of the 8 nearest pixels around
-        (b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2]). For locations outside
-        of the image, we use the nearest pixel values at the image boundary.
-        Args:
-          image: 5-D float `Tensor` with shape `[batch, height, width, depth, channels]`.
-          flow: A 5-D float `Tensor` with shape `[batch, height, width, depth, 3]`.
-          name: A name for the operation (optional).
-          Note that image and flow can be of type tf.half, tf.float32, or tf.float64,
-          and do not necessarily have to be the same type.
-        Returns:
-          A 5-D float `Tensor` with shape`[batch, height, width, depth, channels]`
-            and same type as input image.
-        Raises:
-          ValueError: if height < 2 or width < 2 or the inputs have the wrong number
-                      of dimensions.
-        """
-
-        batch_size, height, width, depth, channels = (array_ops.shape(image)[0],
-                                                    array_ops.shape(image)[1],
-                                                    array_ops.shape(image)[2],
-                                                    array_ops.shape(image)[3],
-                                                    array_ops.shape(image)[4])
-
-        # The flow is defined on the image grid. Turn the flow into a list of query
-        # points in the grid space.
-        grid_x, grid_y, grid_z = array_ops.meshgrid(
-            math_ops.range(width), math_ops.range(height), math_ops.range(depth))
-        stacked_grid = math_ops.cast(
-            array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
-        batched_grid = array_ops.expand_dims(stacked_grid, axis=0)
-        query_points_on_grid = batched_grid - flow
-        query_points_flattened = array_ops.reshape(query_points_on_grid,
-                                                   [batch_size, height * width * depth, 3])
-        # Compute values at the query points, then reshape the result back to the
-        # image grid.
-        interpolated = interpolate_trilinear(image, query_points_flattened)
-        interpolated = array_ops.reshape(interpolated,
-                                         [batch_size, height, width, depth, channels])
-        return interpolated
