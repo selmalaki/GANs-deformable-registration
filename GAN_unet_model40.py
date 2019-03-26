@@ -31,11 +31,18 @@ __author__ = 'elmalakis'
 
 class GANUnetModel40:
     def __init__(self):
-        self.crop_size_g = (40, 40, 40)
-        self.crop_size_d = (40, 40, 40)
+        self.img_row = 40
+        self.img_col = 40
+        self.img_depth = 40
+        self.crop_size_g = (self.img_row, self.img_col, self.img_depth)
+        self.crop_size_d = (self.img_row, self.img_col, self.img_depth)
         self.channels = 1
         self.input_shape_g = self.crop_size_g + (self.channels,)
         self.input_shape_d = self.crop_size_d + (self.channels,)
+
+        # Calculate output shape of D
+        patch = int(self.img_row / 2**2)  # 2 layers deep network
+        self.disc_patch = (patch, patch, patch, 1)
 
         # Number of filters in the first layer of G and D
         self.gf = 64
@@ -48,13 +55,19 @@ class GANUnetModel40:
         self.discriminator.compile(loss='binary_crossentropy',
             optimizer=optimizer,
             metrics=['accuracy'])
+        print('--- Discriminator model ---')
+        self.discriminator.summary()
 
 
         # Build the generator
         self.generator = self.build_generator()
+        print('--- Generator model ---')
+        self.generator.summary()
 
         # Build the deformable transformation layer
         self.transformation = self.build_transformation()
+        print('--- Transformation layer ---')
+        self.transformation.summary()
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
@@ -74,6 +87,7 @@ class GANUnetModel40:
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
+        self.transformation.trainable = False
 
         # Discriminators determines validity of translated images / condition pairs
         valid = self.discriminator([warped_S, img_R])
@@ -82,66 +96,6 @@ class GANUnetModel40:
         self.combined.compile(loss=partial_gp_loss,
                               optimizer=optimizer)
 
-    """
-    Generator Network
-    """
-    def build_generator(self):
-        """U-Net Generator"""
-        def g_layer(input_tensor,
-                        n_filters,
-                        kernel_size=(3, 3, 3),
-                        batch_normalization=True,
-                        scale=True,
-                        padding='valid',
-                        use_bias=False):
-            """
-            3D convolutional layer (+ batch normalization) followed by ReLu activation
-            """
-            layer = Conv3D(filters=n_filters,
-                           kernel_size=kernel_size,
-                           padding=padding,
-                           use_bias=use_bias)(input_tensor)
-            if batch_normalization:
-                layer = BatchNormalization()(layer)
-            layer = Activation('relu')(layer)
-
-            return layer
-
-
-        input_shape = self.input_shape_g
-        img_S = Input(shape=input_shape)  # 40x40x40
-        img_T = Input(shape=input_shape)  # 40x40x40
-
-        # Concatenate subject image and template image by channels to produce input
-        combined_imgs = Concatenate(axis=-1)([img_S, img_T])
-
-        # down-sampling
-        down1 = g_layer(input_tensor=combined_imgs, n_filters=self.gf, padding='same')  # 40x40x40
-        down1 = g_layer(input_tensor=down1, n_filters=self.gf, padding='same')  # 40x40x40
-        pool1 = MaxPooling3D(pool_size=(2, 2, 2))(down1)  # 20x20x20
-
-        down2 = g_layer(input_tensor=pool1, n_filters=2 * self.gf, padding='same')  # 20x20x20
-        down2 = g_layer(input_tensor=down2, n_filters=2 * self.gf, padding='same')  # 20x20x20
-        pool2 = MaxPooling3D(pool_size=(2, 2, 2))(down2)  #10x10x10
-
-        center = g_layer(input_tensor=pool2, n_filters=4 * self.gf, padding='same')  # 10x10x10
-        center = g_layer(input_tensor=center, n_filters=4 * self.gf, padding='same')  # 10x10x10
-
-        # up-sampling
-        up2 = concatenate([down2, UpSampling3D(size=(2, 2, 2))(center)])  # 20x20x20
-        up2 = g_layer(input_tensor=up2, n_filters=2 * self.gf, padding='same')  # 20x20x20
-        up2 = g_layer(input_tensor=up2, n_filters=2 * self.gf, padding='same')  # 20x20x20
-
-        up1 = concatenate([down1, UpSampling3D(size=(2, 2, 2))(up2)])  # 40x40x40
-        up1 = g_layer(input_tensor=up1, n_filters=self.gf, padding='same')  #40x40x40
-        up1 = g_layer(input_tensor=up1, n_filters=self.gf, padding='same')  #40x40x40
-
-        # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
-        phi = Conv3D(filters=1, kernel_size=(1, 1, 1), use_bias=False)(up1)  # 40x4040
-
-        model = Model([img_S, img_T], outputs=phi)
-
-        return model
 
     """
     Discriminator Network
@@ -178,6 +132,71 @@ class GANUnetModel40:
         #validity = Dense(1, activation='sigmoid')(d4)
 
         return Model([img_A, img_B], validity)
+
+
+    """
+     Generator Network
+     """
+    def build_generator(self):
+        """U-Net Generator"""
+
+        def g_layer(input_tensor,
+                    n_filters,
+                    kernel_size=(3, 3, 3),
+                    batch_normalization=True,
+                    scale=True,
+                    padding='valid',
+                    use_bias=False):
+            """
+            3D convolutional layer (+ batch normalization) followed by ReLu activation
+            """
+            layer = Conv3D(filters=n_filters,
+                           kernel_size=kernel_size,
+                           padding=padding,
+                           use_bias=use_bias)(input_tensor)
+            if batch_normalization:
+                layer = BatchNormalization()(layer)
+            layer = Activation('relu')(layer)
+
+            return layer
+
+        input_shape = self.input_shape_g
+        img_S = Input(shape=input_shape)  # 40x40x40
+        img_T = Input(shape=input_shape)  # 40x40x40
+
+        # Concatenate subject image and template image by channels to produce input
+        combined_imgs = Concatenate(axis=-1)([img_S, img_T])
+
+        # down-sampling
+        down1 = g_layer(input_tensor=combined_imgs, n_filters=self.gf, padding='same')  # 40x40x40
+        down1 = g_layer(input_tensor=down1, n_filters=self.gf, padding='same')  # 40x40x40
+        pool1 = MaxPooling3D(pool_size=(2, 2, 2))(down1)  # 20x20x20
+
+        down2 = g_layer(input_tensor=pool1, n_filters=2 * self.gf, padding='same')  # 20x20x20
+        down2 = g_layer(input_tensor=down2, n_filters=2 * self.gf, padding='same')  # 20x20x20
+        pool2 = MaxPooling3D(pool_size=(2, 2, 2))(down2)  # 10x10x10
+
+        center = g_layer(input_tensor=pool2, n_filters=4 * self.gf, padding='same')  # 10x10x10
+        center = g_layer(input_tensor=center, n_filters=4 * self.gf, padding='same')  # 10x10x10
+
+        # up-sampling
+        up2 = concatenate([down2, UpSampling3D(size=(2, 2, 2))(center)])  # 20x20x20
+        up2 = g_layer(input_tensor=up2, n_filters=2 * self.gf, padding='same')  # 20x20x20
+        up2 = g_layer(input_tensor=up2, n_filters=2 * self.gf, padding='same')  # 20x20x20
+
+        up1 = concatenate([down1, UpSampling3D(size=(2, 2, 2))(up2)])  # 40x40x40
+        up1 = g_layer(input_tensor=up1, n_filters=self.gf, padding='same')  # 40x40x40
+        up1 = g_layer(input_tensor=up1, n_filters=self.gf, padding='same')  # 40x40x40
+
+        # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
+        phi = Conv3D(filters=1, kernel_size=(1, 1, 1), use_bias=False)(up1)  # 40x4040
+
+        #warped_S = Lambda(dense_image_warp_3D)([img_S, phi])
+        #model = Model([img_S, img_T], outputs=warped_S)
+
+        model = Model([img_S, img_T], outputs=phi)
+
+        return model
 
 
     """
