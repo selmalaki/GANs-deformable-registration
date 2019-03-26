@@ -2,6 +2,7 @@ import scipy
 import numpy as np
 from glob import glob
 import matplotlib.pyplot as plt
+from skimage.transform import resize
 
 class DataLoader():
 
@@ -20,6 +21,8 @@ class DataLoader():
 
         self.imgs_test = []
         self.masks_test = []
+
+        template_shape = (1166, 1996, 40) # most of the images have this size
 
         filepath = '/groups/scicompsoft/home/elmalakis/Work/Janelia/ImageRegistration/data/for_salma/preprocess_to_4/'
         img_pp = [filepath +'subject_1_anat_stack_regiprep_pp.nii.gz',
@@ -68,11 +71,16 @@ class DataLoader():
             curr_img, meta_dict = self._read_nifti(img_pp[i])
             curr_img = np.float32(curr_img)
             curr_img = (curr_img - np.mean(curr_img))/ np.std(curr_img)
-            self.imgs.append(curr_img)
             # masks
             curr_mask, meta_dict = self._read_nifti(mask_pp[i])
             curr_mask = np.float32(curr_mask)
-            self. masks.append(curr_mask)
+            # resize
+            if curr_img.shape != template_shape:
+                curr_img = resize(curr_img, template_shape, anti_aliasing=True)
+                curr_mask = resize(curr_mask, template_shape, anti_aliasing=True)
+
+            self.masks.append(curr_mask)
+            self.imgs.append(curr_img)
 
         # template is subject 4
         self.img_template = self.imgs.pop(3)
@@ -87,6 +95,7 @@ class DataLoader():
         self.masks_test.append(self.masks.pop(15))
         self.masks_test.append(self.masks.pop(14))
 
+        self.n_batches = int(len(self.imgs) / self.batch_sz)
 
     def get_template(self):
         return self.img_template
@@ -103,8 +112,9 @@ class DataLoader():
 
 
     def load_batch(self):
+
         while True:
-            print('----- loading a batch -----')
+            #print('----- loading a batch -----')
             batch_img = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1), dtype='float32')
             batch_mask = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
 
@@ -128,13 +138,14 @@ class DataLoader():
                 cropped_mask_template = self.mask_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 # if include the random crop in training
                 is_include = False
-                num_vox = len(cropped_mask[cropped_mask == 255])
+                num_vox = len(cropped_mask[cropped_mask == 1])
 
                 accept_prob = np.random.random()
                 if num_vox > 500 and accept_prob > 0.98:
                     is_include = True
 
                 if is_include:
+                    #print('include this batch %d' %(num_crop))
                     batch_img[num_crop,:,:,:,0] = cropped_img
                     batch_mask[num_crop,:,:,:,0] = cropped_mask
 
@@ -166,3 +177,6 @@ class DataLoader():
         nib.save(image, path)
 
 
+if __name__ == '__main__':
+    dataloader = DataLoader()
+    dataloader.load_batch()
