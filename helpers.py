@@ -91,6 +91,7 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
                 # (since the alpha values don't depend on the channel).
                 alpha = array_ops.expand_dims(alpha, 2)
                 alphas.append(alpha)
+                #K.print_tensor(alpha)
 
         flattened_grid = array_ops.reshape(grid,
                                            [batch_size * height * width * depth, channels])
@@ -125,13 +126,13 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
             # we perform 4 linear interpolation to compute a, b, c, and d using alpha[1],
             # then we compute e and f by interpolating a, b, c and d  using alpha[0],
             # and finally we find our sample point by interpolating e and f using alpha[2]
-            a = alpha[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
-            b = alpha[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
-            c = alpha[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
-            d = alpha[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
-            e = alpha[0] * (b - a) + a
-            f = alpha[0] * (d - c) + c
-            g = alpha[2] * (f - e) + e
+            with ops.name_scope('alpha-a'): a = alphas[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
+            with ops.name_scope('alpha-b'): b = alphas[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
+            with ops.name_scope('alpha-c'): c = alphas[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
+            with ops.name_scope('alpha-d'): d = alphas[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
+            with ops.name_scope('alpha-e'): e = alphas[0] * (b - a) + a
+            with ops.name_scope('alpha-f'): f = alphas[0] * (d - c) + c
+            with ops.name_scope('alpha-g'): g = alphas[2] * (f - e) + e
 
         return g
 
