@@ -20,16 +20,19 @@ from tensorflow.python.ops import math_ops
 import matplotlib.pyplot as plt
 from functools import partial
 import numpy as np
+import datetime
 import scipy
 import sys
+import os
 
-from .helpers import dense_image_warp_3D, numerical_gradient_3D
+from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
+from ImageRegistrationGANs.data_loader import DataLoader
 
 
 __author__ = 'elmalakis'
 
 
-class GANUnetModel40:
+class GANUnetModel40():
     def __init__(self):
         self.img_row = 40
         self.img_col = 40
@@ -43,6 +46,9 @@ class GANUnetModel40:
         # Calculate output shape of D
         patch = int(self.img_row / 2**2)  # 2 layers deep network
         self.disc_patch = (patch, patch, patch, 1)
+
+        self.batch_sz = 8 # for testing locally
+        self.data_loader = DataLoader(batch_sz=self.batch_sz)
 
         # Number of filters in the first layer of G and D
         self.gf = 64
@@ -241,6 +247,133 @@ class GANUnetModel40:
         return K.mean(gradient_penalty) + lr
 
 
+    """
+    Training
+    """
+    def train(self, epochs, batch_size=1, sample_interval=50):
+        # Adversarial loss ground truths
+        valid = np.ones((self.batch_sz,) + self.disc_patch)
+        fake = np.zeros((self.batch_sz,) + self.disc_patch)
+
+        start_time = datetime.datetime.now()
+
+        for epoch in range(epochs):
+            for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch()):
+                # ---------------------
+                #  Train Discriminator
+                # ---------------------
+                phi = self.generator.predict([batch_img, batch_img_template])
+
+                # deformable transformation
+                transform = self.transformation.predict([batch_img, phi])
+
+                # Create a ref image by perturbing th subject image with the template image
+                perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
+                batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
+
+                # Train the discriminator (img -> z is valid, z -> img is fake)
+                d_loss_real = self.discriminator.train_on_batch([batch_ref, batch_img], valid)
+                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img], fake)
+                d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
+
+                # ---------------------
+                #  Train Generator
+                # ---------------------
+
+                # Train the generator (z -> img is valid and img -> z is is invalid)
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref], valid)
+
+                elapsed_time = datetime.datetime.now() - start_time
+                # Plot the progress
+                # Plot the progress
+                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] time: %s" % (epoch, epochs,
+                                                                        batch_i, self.data_loader.n_batches,
+                                                                        d_loss[0], 100*d_loss[1],
+                                                                        g_loss,
+                                                                        elapsed_time))
+
+
+                # If at save interval => save generated image samples
+            #if epoch % sample_interval == 0
+            self.sample_images(epoch, batch_i) #save by the end of each epoch
+
+
+
+    def sample_images(self, epoch, batch_i):
+        os.makedirs('generated/' , exist_ok=True)
+
+        idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
+        imgs_T = self.data_loader.img_template
+        imgs_T_mask = self.data_loader.mask_template
+
+        imgs_S = imgs_S * imgs_S_mask
+        imgs_T = imgs_T * imgs_T_mask
+
+        predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
+
+        input_sz = (40, 40, 40)
+        step = (15, 15, 15)
+
+
+        # No gap here because the ouput is the same as the input
+        #gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
+        start_time = datetime.datetime.now()
+        for row in range(0, imgs_S.shape[0] - input_sz[0], step[0]):
+            for col in range(0, imgs_S.shape[1] - input_sz[1], step[1]):
+                #for vol in range(0, imgs_S.shape[2] - input_sz[2], step[2]):
+
+                    patch_sub_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_S.dtype)
+                    patch_templ_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_T.dtype)
+
+                    patch_sub_img[0, :, :, :, 0] = imgs_S[row:row + input_sz[0], col:col + input_sz[1], :]
+                    patch_templ_img[0, :, :, :, 0] = imgs_T[row:row + input_sz[0], col:col + input_sz[1], :]
+
+                    patch_predict_phi = self.generator.predict([patch_sub_img,patch_templ_img] )
+                    patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
+
+                    #predict_img[row + gap[0]:row + gap[0] + step[0], col + gap[1]:col + gap[1] + step[1], vol+gap[2]:vol+gap[2]+step[2]] = patch_predict_warped[0, :, :, :, 0]
+                    predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
+
+        elapsed_time = datetime.datetime.now() - start_time
+        print(" --- Prediction time: %s" % (elapsed_time))
+
+        self._write_nifti("generated/%d_%d" % (epoch, batch_i), predict_img)
+
+        file_name = 'gan_network'
+
+        # save the whole network
+        gan.combined.save(file_name + '.whole.h5', overwrite=True)
+        print('Save the whole network to disk as a .whole.h5 file')
+        model_jason = gan.combined.to_json()
+        with open(file_name + '_arch.json', 'w') as json_file:
+            json_file.write(model_jason)
+        gan.combined.save_weights(file_name + '_weights.h5', overwrite=True)
+        print('Save the network architecture in .json file and weights in .h5 file')
+
+        # save the generator network
+        gan.generator.save(file_name + '.gen.h5', overwrite=True)
+        print('Save the generator network to disk as a .whole.h5 file')
+        model_jason = gan.combined.to_json()
+        with open(file_name + '_gen_arch.json', 'w') as json_file:
+            json_file.write(model_jason)
+        gan.combined.save_weights(file_name + '_gen_weights.h5', overwrite=True)
+        print('Save the generator architecture in .json file and weights in .h5 file')
+
+
+    def _write_nifti(self,path, image_data, meta_dict={}):
+        #    image_data = _standardize_axis_order(image_data, 'nii') # possibly a bad idea
+        import nibabel as nib
+        image = nib.Nifti1Image(image_data, None)
+        for key in meta_dict.keys():
+            if key in image.header.keys():
+                image.header[key] = meta_dict[key]
+        nib.save(image, path)
+
+
+if __name__ == '__main__':
+    K.tensorflow_backend._get_available_gpus()
+    gan = GANUnetModel40()
+    gan.train(epochs=1000, batch_size=1, sample_interval=200)
 
 
 
