@@ -1,4 +1,5 @@
 import scipy
+import random
 import numpy as np
 from glob import glob
 import matplotlib.pyplot as plt
@@ -74,6 +75,7 @@ class DataLoader():
             # masks
             curr_mask, meta_dict = self._read_nifti(mask_pp[i])
             curr_mask = np.float32(curr_mask)
+
             # resize
             if curr_img.shape != template_shape:
                 curr_img = resize(curr_img, template_shape, anti_aliasing=True)
@@ -95,25 +97,41 @@ class DataLoader():
         self.masks_test.append(self.masks.pop(15))
         self.masks_test.append(self.masks.pop(14))
 
-        self.n_batches = int(len(self.imgs) / self.batch_sz)
+        self.n_batches = int( (len(self.imgs) * template_shape[0] / self.crop_sz[0] )  / self.batch_sz)
 
     def get_template(self):
         return self.img_template
 
-    def load_data(self, batch_size=1, is_testing=False):
-        idx = 0
-        if is_testing:
-            #ue batch_size=1 for now
-            idx, batch_images = np.random.choice(list(enumerate(self.imgs_test)))
-        else:
-            batch_images = np.random.choice(self.imgs, size=batch_size)
+    def load_data(self, batch_size=1, is_testing=False, is_validation=False):
+        #idxs = []
+        #test_images = []
+        #test_masks = []
 
-        return idx, batch_images
+        #for batch in range(batch_size):
+
+        idx = None
+        test_image = None
+        test_mask = None
+        if is_testing:
+             #use batch_size=1 for now
+            idx, test_image = random.choice(list(enumerate(self.imgs_test)))
+            test_mask = self.masks_test[idx]
+
+            #idxs.append(idx)
+            #test_images.append(test_image)
+            #test_masks.append(test_mask)
+
+        elif is_validation:
+            idx, test_image = random.choice(list(enumerate(self.imgs)))
+            test_mask = self.masks[idx]
+
+
+        return idx, test_image, test_mask
 
 
     def load_batch(self):
 
-        while True:
+        for i in range(self.n_batches - 1):
             #print('----- loading a batch -----')
             batch_img = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1), dtype='float32')
             batch_mask = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
