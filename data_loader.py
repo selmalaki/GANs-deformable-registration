@@ -68,11 +68,11 @@ class DataLoader():
 
         print('----- loading data file -----')
         for i in range(len(img_pp)):
-            # images
+            # images normalize
             curr_img, meta_dict = self._read_nifti(img_pp[i])
             curr_img = np.float32(curr_img)
             curr_img = (curr_img - np.mean(curr_img))/ np.std(curr_img)
-            # masks
+            # masks 1: interesting value, 0: not interesting value
             curr_mask, meta_dict = self._read_nifti(mask_pp[i])
             curr_mask = np.float32(curr_mask)
 
@@ -150,7 +150,7 @@ class DataLoader():
                 y = np.random.randint(0, img_for_crop.shape[1] - self.crop_sz[1])
                 z = 0 # take the whole dimension of Z
                 # crop in the x-y dimension only and use the all the slices
-                cropped_img = img_for_crop[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
+                cropped_img = img_for_crop[x:x+self.crop_sz[0], y:y+self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_img_template = self.img_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_mask = mask_for_crop[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_mask_template = self.mask_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
@@ -167,8 +167,14 @@ class DataLoader():
                     batch_img[num_crop,:,:,:,0] = cropped_img
                     batch_mask[num_crop,:,:,:,0] = cropped_mask
 
+                    # filter the image with the mask
+                    batch_img = batch_img * batch_mask
+
                     batch_img_template[num_crop,:,:,:,0] = cropped_img_template
                     batch_mask_template[num_crop,:,:,:,0] = cropped_mask_template
+
+                    # filter the template with the mask
+                    batch_img_template = batch_img_template * batch_mask_template
 
                     num_crop += 1
 
