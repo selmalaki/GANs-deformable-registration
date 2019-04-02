@@ -23,13 +23,13 @@ import numpy as np
 import scipy
 import sys
 
-from .helpers import dense_image_warp_3D, numerical_gradient_3D
+from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
 
 
 __author__ = 'elmalakis'
 
 
-class GANUnetModel64:
+class GANUnetModel64():
     def __init__(self):
         self.crop_size_g = (64, 64, 64)
         self.crop_size_d = (24, 24, 24)
@@ -139,7 +139,7 @@ class GANUnetModel64:
         up1 = g_layer(input_tensor=up1, n_filters=self.gf, padding='valid')  # 24x24x24
 
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
-        phi = Conv3D(filters=1, kernel_size=(1, 1, 1), use_bias=False)(up1)  # 24x24x24
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False)(up1)  # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi)
 
@@ -222,6 +222,18 @@ class GANUnetModel64:
         gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
         return K.mean(gradient_penalty) + lr
+
+
+
+if __name__ == '__main__':
+    # Use GPU
+    K.tensorflow_backend._get_available_gpus()
+    # launch tf debugger
+    #sess = K.get_session()
+    #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
+    #K.set_session(sess)
+
+    gan = GANUnetModel64()
 
 
 
