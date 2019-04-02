@@ -13,6 +13,8 @@ from tensorflow.python.ops import math_ops
 
 __author__ = 'elmalakis'
 
+DEBUG=0
+
 """
 Define trilinear interpolation
 It uses tensorflow array operations so this function has to be wrapped in a lambda layer before being used in keras
@@ -66,7 +68,6 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         for dim in index_order:
             with ops.name_scope('dim-' + str(dim)):
                 queries = unstacked_query_points[dim]
-
                 size_in_indexing_dimension = shape[dim + 1]  # because batch size is the first index in shape
 
                 # max_floor is size_in_indexing_dimension - 2 so that max_floor + 1
@@ -76,8 +77,10 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
                 floor = math_ops.minimum(
                     math_ops.maximum(min_floor, math_ops.floor(queries)), max_floor)
                 int_floor = math_ops.cast(floor, dtypes.int32)
+                if DEBUG: int_floor = K.print_tensor(int_floor, message='int_floor is:')
                 floors.append(int_floor)
                 ceil = int_floor + 1
+                if DEBUG: ceil = K.print_tensor(ceil, message='ceil is:')
                 ceils.append(ceil)
 
                 # alpha has the same type as the grid, as we will directly use alpha
@@ -90,8 +93,9 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
                 # Expand alpha to [b, n, 1] so we can use broadcasting
                 # (since the alpha values don't depend on the channel).
                 alpha = array_ops.expand_dims(alpha, 2)
+                if DEBUG: alpha = K.print_tensor(alpha, message='alpha is:')
                 alphas.append(alpha)
-                #K.print_tensor(alpha)
+                K.print_tensor(alpha)
 
         flattened_grid = array_ops.reshape(grid,
                                            [batch_size * height * width * depth, channels])
@@ -105,7 +109,8 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         def gather(y_coords, x_coords, z_coords, name):
             with ops.name_scope('gather-' + name):
                 # map a 3d coordinates to a single number
-                linear_coordinates = batch_offsets + y_coords * width + x_coords * height + z_coords * depth
+                # https://stackoverflow.com/questions/10903149/how-do-i-compute-the-linear-index-of-a-3d-coordinate-and-vice-versa
+                linear_coordinates = batch_offsets + x_coords + y_coords * width + z_coords * (width*height)
                 gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
                 return array_ops.reshape(gathered_values,
                                          [batch_size, num_queries, channels])
@@ -222,17 +227,20 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     # The flow is defined on the image grid. Turn the flow into a list of query
     # points in the grid space.
-    grid_x, grid_y, grid_z = array_ops.meshgrid(
-        math_ops.range(width), math_ops.range(height), math_ops.range(depth))
-    stacked_grid = math_ops.cast(
-        array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
-    batched_grid = array_ops.expand_dims(stacked_grid, axis=0)
+    grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+    stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+    batched_grid = array_ops.expand_dims(stacked_grid, axis=0) #add the batch dim on axis 0
+
     query_points_on_grid = batched_grid - flow
+    if DEBUG: query_points_on_grid= K.print_tensor(query_points_on_grid, message="query_points_on_grid is:")
+
     query_points_flattened = array_ops.reshape(query_points_on_grid,
                                                [batch_size, height * width * depth, 3])
+    if DEBUG: query_points_flattened = K.print_tensor(query_points_flattened, message="query_points_flattened is:")
     # Compute values at the query points, then reshape the result back to the
     # image grid.
     interpolated = interpolate_trilinear(image, query_points_flattened)
+    if DEBUG: interpolated = K.print_tensor(interpolated, message='interpolated is:')
     interpolated = array_ops.reshape(interpolated,
                                      [batch_size, height, width, depth, channels])
     return interpolated
