@@ -1,3 +1,4 @@
+import nrrd
 import scipy
 import random
 import numpy as np
@@ -5,15 +6,18 @@ from glob import glob
 import matplotlib.pyplot as plt
 from skimage.transform import resize
 
+
+__author__ = 'elmalakis'
+
+
 class DataLoader():
 
-
-    def __init__(self, batch_sz = 16):
-
+    def __init__(self, batch_sz = 16, sample_type = 'fly'):
+        """
+        :param batch_sz: int - size of the batch
+        :param sampletype: string - 'fly' or 'fish'
+        """
         self.batch_sz = batch_sz
-        self.n_gpus = 1
-        self.crop_sz = (40, 40, 40)  # the image shape is 1227,1996,40, and sometimes 1170, 1996,43
-        self.mask_sz = (40, 40, 40)
 
         self.imgs = []
         self.masks = []
@@ -23,9 +27,33 @@ class DataLoader():
         self.imgs_test = []
         self.masks_test = []
 
+        if sample_type is 'fly':
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz)
+        elif sample_type is 'fish':
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
+        else:
+            raise ValueError('Data of type %s is not available'%(sample_type))
+
+
+
+    def prepare_fish_data(self, batch_sz):
+
+        self.batch_sz = batch_sz
+        self.n_gpus = 1
+        self.crop_sz = (40, 40, 40)  # the image shape is 1227,1996,40, and sometimes 1170, 1996,43
+        self.mask_sz = (40, 40, 40)
+
+        imgs = []
+        masks = []
+        img_template = None
+        mask_template = None
+
+        imgs_test = []
+        masks_test = []
+
         template_shape = (1166, 1996, 40) # most of the images have this size
 
-        filepath = '/groups/scicompsoft/home/elmalakis/Work/Janelia/ImageRegistration/data/for_salma/preprocess_to_4/'
+        filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/fishdata/data/for_salma/preprocess_to_4/'
         img_pp = [filepath +'subject_1_anat_stack_regiprep_pp.nii.gz',
                   filepath + 'subject_2_anat_stack_regiprep_pp.nii.gz',
                   filepath + 'subject_3_anat_stack_regiprep_pp.nii.gz',
@@ -81,23 +109,121 @@ class DataLoader():
                 curr_img = resize(curr_img, template_shape, anti_aliasing=True)
                 curr_mask = resize(curr_mask, template_shape, anti_aliasing=True)
 
-            self.masks.append(curr_mask)
-            self.imgs.append(curr_img)
+            masks.append(curr_mask)
+            imgs.append(curr_img)
 
         # template is subject 4
-        self.img_template = self.imgs.pop(3)
-        self.mask_template = self.masks.pop(3)
+        img_template = self.imgs.pop(3)
+        mask_template = self.masks.pop(3)
 
         # test is subject 16, 17, 18 after popping subject 4 the indices are 14, 15, 16 (Indices start at 0)
-        self.imgs_test.append(self.imgs.pop(16))
-        self.imgs_test.append(self.imgs.pop(15))
-        self.imgs_test.append(self.imgs.pop(14))
+        imgs_test.append(self.imgs.pop(16))
+        imgs_test.append(self.imgs.pop(15))
+        imgs_test.append(self.imgs.pop(14))
 
-        self.masks_test.append(self.masks.pop(16))
-        self.masks_test.append(self.masks.pop(15))
-        self.masks_test.append(self.masks.pop(14))
+        masks_test.append(self.masks.pop(16))
+        masks_test.append(self.masks.pop(15))
+        masks_test.append(self.masks.pop(14))
 
-        self.n_batches = int( (len(self.imgs) * template_shape[0] / self.crop_sz[0] )  / self.batch_sz)
+        n_batches = int( (len(self.imgs) * template_shape[0] / self.crop_sz[0] )  / self.batch_sz)
+
+        return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
+
+
+    def prepare_fly_data(self, batch_sz):
+        self.batch_sz = batch_sz
+        self.n_gpus = 1
+        self.crop_sz = (64, 64, 64)
+        self.mask_sz = (64, 64, 64)
+
+        imgs = []
+        masks = []
+        img_template = None
+        mask_template = None
+
+        imgs_test = []
+        masks_test = []
+
+
+        filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
+        img_pp = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
+                  filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
+                  filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
+                  filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
+                  filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
+                  filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd',
+                  filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
+                  filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
+                  ]
+
+        mask_pp = [filepath + '20161102_32_C1_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20161102_32_C3_Scope_4_C1_down_result_mask.nrrd',
+                   filepath + '20161102_32_D1_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20161102_32_D2_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20161102_32_E1_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20161102_32_E3_Scope_4_C1_down_result_mask.nrrd',
+                   filepath + '20161220_31_I1_Scope_2_C1_down_result_mask.nrrd',
+                   filepath + '20161220_31_I2_Scope_6_C1_down_result_mask.nrrd',
+                   filepath + '20161220_31_I3_Scope_6_C1_down_result_mask.nrrd',
+                   filepath + '20161220_32_C1_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20161220_32_C3_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_A2_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_A3_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_A6_Scope_2_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_E1_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_E2_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170223_32_E3_Scope_3_C1_down_result_mask.nrrd',
+                   filepath + '20170301_31_B1_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20170301_31_B3_Scope_1_C1_down_result_mask.nrrd',
+                   filepath + '20170301_31_B5_Scope_1_C1_down_result_mask.nrrd'
+
+                   ]
+
+        print('----- loading data file -----')
+        for i in range(len(img_pp)):
+            # images normalize
+            curr_img, img_header = nrrd.read(img_pp[i])
+            curr_img = np.float32(curr_img)
+            curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+            # masks 1: interesting value, 0: not interesting value
+            curr_mask, mask_header = nrrd.read(mask_pp[i])
+            curr_mask = np.float32(curr_mask)
+
+            masks.append(curr_mask)
+            imgs.append(curr_img)
+
+        # template
+        img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_normalized.nrrd')
+        img_template = np.float32(img_template)
+        img_template = (img_template - np.mean(img_template)) / np.std(img_template)
+        mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask.nrrd')
+
+        # TODO: save test images
+        # test is subject 16, 17, 18 after popping subject 4 the indices are 14, 15, 16 (Indices start at 0)
+        # imgs_test.append(self.imgs.pop(16))
+        # imgs_test.append(self.imgs.pop(15))
+        # imgs_test.append(self.imgs.pop(14))
+        #
+        # masks_test.append(self.masks.pop(16))
+        # masks_test.append(self.masks.pop(15))
+        # masks_test.append(self.masks.pop(14))
+
+        n_batches = int((len(imgs) * img_template.shape[0] / self.crop_sz[0]) / self.batch_sz)
+
+        return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
+
 
     def get_template(self):
         return self.img_template
@@ -116,7 +242,6 @@ class DataLoader():
              #use batch_size=1 for now
             idx, test_image = random.choice(list(enumerate(self.imgs_test)))
             test_mask = self.masks_test[idx]
-
             #idxs.append(idx)
             #test_images.append(test_image)
             #test_masks.append(test_mask)
@@ -125,11 +250,10 @@ class DataLoader():
             idx, test_image = random.choice(list(enumerate(self.imgs)))
             test_mask = self.masks[idx]
 
-
         return idx, test_image, test_mask
 
 
-    def load_batch(self):
+    def load_batch(self, sample_type = 'fly'):
 
         for i in range(self.n_batches - 1):
             #print('----- loading a batch -----')
@@ -148,7 +272,8 @@ class DataLoader():
             while num_crop < self.batch_sz:
                 x = np.random.randint(0, img_for_crop.shape[0] - self.crop_sz[0])
                 y = np.random.randint(0, img_for_crop.shape[1] - self.crop_sz[1])
-                z = 0 # take the whole dimension of Z
+                if sample_type is 'fish': z = 0 # take the whole dimension of Z
+                else: z = np.random.randint(0, img_for_crop.shape[2] - self.crop_sz[2])
                 # crop in the x-y dimension only and use the all the slices
                 cropped_img = img_for_crop[x:x+self.crop_sz[0], y:y+self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_img_template = self.img_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
