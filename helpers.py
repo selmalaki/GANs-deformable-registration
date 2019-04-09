@@ -13,8 +13,6 @@ from tensorflow.python.ops import math_ops
 
 __author__ = 'elmalakis'
 
-DEBUG=0
-
 """
 Define trilinear interpolation
 It uses tensorflow array operations so this function has to be wrapped in a lambda layer before being used in keras
@@ -34,7 +32,7 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         ValueError: if the indexing mode is invalid, or if the shape of the inputs
             invalid.
     """
-
+    DEBUG = 0
     if indexing != 'ijk' and indexing != 'xyz':
         raise ValueError('Indexing mode must be \'ijk\' or \'xyz\'')
 
@@ -157,27 +155,40 @@ def numerical_gradient_3D(phi):
         G: A 5-D float `Tensor` with shape`[batch, height, width, depth, channels]`
         and same type as input phi.
     """
+    DEBUG = 1
     _, Nx, Ny, Nz, _ = phi.shape.as_list()
+    if DEBUG: phi = K.print_tensor(phi, message='phi is:')
     # ... calculates the central difference for interior data points --> like Matlab: gradient(F)
     # G(:,j) = 0.5*(A(:,j+1) - A(:,j-1));
     Gy_c = 0.5 * (phi[:, 2:, :, :, :] - phi[:, :-2, :, :, :])  # (b, 22, 24, 24, 1)
     Gx_c = 0.5 * (phi[:, :, 2:, :, :] - phi[:, :, :-2, :, :])  # (b, 22 23, 24, 1)
     Gz_c = 0.5 * (phi[:, :, :, 2:, :] - phi[:, :, :, :-2, :])  # (b, 22, 24, 23, 1)
-
+    if DEBUG: Gy_c = K.print_tensor(Gy_c, message='Gy_c is:')
+    if DEBUG: Gx_c = K.print_tensor(Gx_c, message='Gx_c is:')
+    if DEBUG: Gz_c = K.print_tensor(Gz_c, message='Gz_c is:')
     # ... calculate values along the edges of the matrix with single-sides differences
     Gy_N = phi[:, Nx - 1:Nx, :, :, :] - phi[:, Nx - 2:Nx - 1, :, :, :]
     Gy_0 = phi[:, 1:2, :, :, :] - phi[:, 0:1, :, :, :]
+    if DEBUG: Gy_N = K.print_tensor(Gy_N, message='Gy_N is:')
+    if DEBUG: Gy_0 = K.print_tensor(Gy_0, message='Gy_0 is:')
 
     Gx_N = phi[:, :, Ny - 1:Ny, :, :] - phi[:, :, Ny - 2:Ny - 1, :, :]
     Gx_0 = phi[:, :, 1:2, :, :] - phi[:, :, 0:1, :, :]
+    if DEBUG: Gx_N = K.print_tensor(Gx_N, message='Gx_N is:')
+    if DEBUG: Gx_0 = K.print_tensor(Gx_0, message='Gx_0 is:')
 
     Gz_N = phi[:, :, :, Nz - 1:Nz, :] - phi[:, :, :, Nz - 2:Nz - 1, :]
     Gz_0 = phi[:, :, :, 1:2, :] - phi[:, :, :, 0:1, :]
+    if DEBUG: Gz_N = K.print_tensor(Gz_N, message='Gx_N is:')
+    if DEBUG: Gz_0 = K.print_tensor(Gz_0, message='Gx_0 is:')
 
     # ... concatenate the edge differences with the central differences
     Gy = K.concatenate([Gy_0, Gy_c, Gy_N], axis=1)
     Gx = K.concatenate([Gx_0, Gx_c, Gx_N], axis=2)
     Gz = K.concatenate([Gz_0, Gz_c, Gz_N], axis=3)
+    if DEBUG: Gy = K.print_tensor(Gy, message='Gy is:')
+    if DEBUG: Gx = K.print_tensor(Gx, message='Gx is:')
+    if DEBUG: Gz = K.print_tensor(Gz, message='Gz is:')
 
     # ... then add the partial gradients
     G = Gx + Gy + Gz
@@ -216,6 +227,7 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
                   of dimensions.
     """
 
+    DEBUG = 0
     image = tensors[0]
     flow = tensors[1]
 
