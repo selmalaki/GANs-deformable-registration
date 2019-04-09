@@ -1,6 +1,7 @@
 from __future__ import print_function, division
 
 import keras.backend as K
+import tensorflow as tf
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
 from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate, concatenate
@@ -189,9 +190,9 @@ class GANUnetModel64():
     """
     def build_discriminator(self):
 
-        def d_layer(layer_input, filters, f_size=3, bn=True,  name=''):
+        def d_layer(layer_input, filters, f_size=3, bn=False,  name=''): #change the bn to False
             """Discriminator layer"""
-            d = Conv3D(filters, kernel_size=f_size, strides=1, padding='same', name=name+'_conv3d')(layer_input)
+            d = Conv3D(filters, kernel_size=f_size, strides=1, padding='valid', name=name+'_conv3d')(layer_input)
             d = ReLU(name=name+'_relu')(d)
             if bn:
                 d = BatchNormalization(name=name+'_bn')(d)
@@ -203,20 +204,23 @@ class GANUnetModel64():
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_B])
 
-        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
-        d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 12x12x12
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 22x22x22
+        d2 = d_layer(d1, self.df*2, name='d2')                                  # 20x20x20
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 10x10x10
 
-        d3 = d_layer(pool, self.df*4, name='d3')                                # 12x12x12
-        d4 = d_layer(d3, self.df*8, name='d4')                                  # 12x12x12
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 6x6x6
+        d3 = d_layer(pool, self.df*4, name='d3')                                # 8x8x8
+        d4 = d_layer(d3, self.df*8, name='d4')                                  # 6x6x6
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 3x3x3
 
-        d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
+        d5 = d_layer(pool, self.df*8, name='d5')                                # 1x1x1
 
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally linear
         # ToDo: Use FC layer at the end like specified in the paper
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
-        #validity = Dense(1, activation='sigmoid')(d4)
+        #validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
+
+        # Use FC layer
+        #d6 = Flatten(input_shape=(1,1,1))(d5)
+        validity = Dense(1, activation='sigmoid')(d5)
 
         return Model([img_A, img_B], validity, name='discriminator_model')
 
@@ -272,17 +276,26 @@ class GANUnetModel64():
     Training
     """
     def train(self, epochs, batch_size=1, sample_interval=50):
+
         # Adversarial loss ground truths
-        disc_patch = (6,6,6,1) # discrimniator output when input is 24x24x24
+        disc_patch = (1,1,1,1) # discrimniator output
         input_sz = 64
         output_sz = 24
         gap = input_sz - output_sz
 
-        valid = np.ones((self.batch_sz,) + disc_patch)
-        fake = np.zeros((self.batch_sz,) + disc_patch)
+        # hard labels
+        validhard = np.ones((self.batch_sz,) + disc_patch)
+        fakehard = np.zeros((self.batch_sz,) + disc_patch)
+
+        #validhard = np.ones((self.batch_sz, 1))
+        #fakehard = np.zeros((self.batch_sz, 1))
+
+        # soft labels
+        #valid = 0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
+        #fake = 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
+
 
         start_time = datetime.datetime.now()
-
         for epoch in range(epochs):
             for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch()):
                 # ---------------------
@@ -290,7 +303,7 @@ class GANUnetModel64():
                 # ---------------------
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
                 # deformable transformation
-                transform = self.transformation.predict([batch_img, phi]) #24x24x24
+                transform = self.transformation.predict([batch_img, phi])     #24x24x24
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
@@ -308,8 +321,8 @@ class GANUnetModel64():
                                                             0 + gap:0 + gap + output_sz, :]
 
                 # Train the discriminator (img -> z is valid, z -> img is fake)
-                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_sub], valid)
-                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_sub], fake)
+                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_sub], validhard)
+                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_sub], fakehard)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # ---------------------
@@ -318,7 +331,7 @@ class GANUnetModel64():
 
                 # Train the generator (z -> img is valid and img -> z is is invalid)
                 # Train the generator (to have the discriminator label samples as valid)
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], valid)
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
 
                 elapsed_time = datetime.datetime.now() - start_time
                 # Plot the progress
@@ -334,6 +347,16 @@ class GANUnetModel64():
             #if epoch % sample_interval == 0
             self.sample_images(epoch, batch_i) #save by the end of each epoch
 
+
+    def write_log(self, callback, names, logs, batch_no):
+        #https://github.com/eriklindernoren/Keras-GAN/issues/52
+        for name, value in zip(names, logs):
+            summary = tf.Summary()
+            summary_value = summary.value.add()
+            summary_value.simple_value = value
+            summary_value.tag = name
+            callback.writer.add_summary(summary, batch_no)
+            callback.writer.flush()
 
 
     def sample_images(self, epoch, batch_i):
@@ -377,7 +400,7 @@ class GANUnetModel64():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated/%d_%d" % (epoch, batch_i), predict_img)
+        nrrd.write(path+"generated/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
 
         file_name = 'gan_network'
 
