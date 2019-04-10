@@ -48,7 +48,7 @@ class GANUnetModel64():
         self.gf = 64
         self.df = 64
 
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(0.0002, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
