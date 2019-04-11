@@ -1,5 +1,6 @@
 from __future__ import print_function, division
 
+from keras.callbacks import TensorBoard
 import keras.backend as K
 import tensorflow as tf
 
@@ -42,13 +43,13 @@ class GANUnetModel64():
         self.output_shape_d = (6, 6, 6) + (self.channels,)
 
         self.batch_sz = 4 # for testing locally to avoid memory allocation
-        self.data_loader = DataLoader(batch_sz=self.batch_sz, sample_type='fly')
+        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
 
         # Number of filters in the first layer of G and D
         self.gf = 64
         self.df = 64
 
-        optimizer = Adam(0.0002, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizer = Adam(0.001, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -80,6 +81,8 @@ class GANUnetModel64():
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
+        self.transformation.trainable = False
+        self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
         valid = self.discriminator([warped_S, img_R])
@@ -87,6 +90,12 @@ class GANUnetModel64():
         self.combined = Model(inputs=[img_S, img_T, img_R], outputs=valid)
         self.combined.compile(loss=partial_gp_loss,
                               optimizer=optimizer)
+
+        if self.DEBUG:
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
+            self.callback = TensorBoard(log_path)
+            self.callback.set_model(self.combined)
+
 
     """
     Generator Network
@@ -192,7 +201,7 @@ class GANUnetModel64():
 
         def d_layer(layer_input, filters, f_size=3, bn=False,  name=''): #change the bn to False
             """Discriminator layer"""
-            d = Conv3D(filters, kernel_size=f_size, strides=1, padding='valid', name=name+'_conv3d')(layer_input)
+            d = Conv3D(filters, kernel_size=f_size, strides=1, padding='same', name=name+'_conv3d')(layer_input)
             d = ReLU(name=name+'_relu')(d)
             if bn:
                 d = BatchNormalization(name=name+'_bn')(d)
@@ -204,15 +213,15 @@ class GANUnetModel64():
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_B])
 
-        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 22x22x22
-        d2 = d_layer(d1, self.df*2, name='d2')                                  # 20x20x20
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 10x10x10
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
+        d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 12x12x12
 
-        d3 = d_layer(pool, self.df*4, name='d3')                                # 8x8x8
-        d4 = d_layer(d3, self.df*8, name='d4')                                  # 6x6x6
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 3x3x3
+        d3 = d_layer(pool, self.df*4, name='d3')                                # 12x12x12
+        d4 = d_layer(d3, self.df*8, name='d4')                                  # 12x12x12
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 6x6x6
 
-        d5 = d_layer(pool, self.df*8, name='d5')                                # 1x1x1
+        d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
 
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally linear
         # ToDo: Use FC layer at the end like specified in the paper
@@ -234,10 +243,10 @@ class GANUnetModel64():
 
         #TODO: Check if this affects the results
         #img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
-        img_S_downsampled = Cropping3D(cropping=20)(img_S)  # 24x24x24
+        img_S_cropped = Cropping3D(cropping=20)(img_S)  # 24x24x24
         # Put the warping function in a Lambda layer because it uses tensorflow
         # phi_upsampled =  Cropping3D((4,4,4))(UpSampling3D(size=(3,3,3))(phi)) #64x64x64
-        warped_S = Lambda(dense_image_warp_3D)([img_S_downsampled, phi])
+        warped_S = Lambda(dense_image_warp_3D)([img_S_cropped, phi])
 
         return Model([img_S, phi], warped_S)
 
@@ -249,10 +258,11 @@ class GANUnetModel64():
         """
         Computes gradient penalty on phi to ensure smoothness
         """
-        if y_true == 0:
-            lr = -K.log(1-y_pred) # negative sign because the loss should be a positive value
-        else:
-            lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
+        # when ytrue = 0 but the discriminator give ypred =1 then it should be a small loss for the generator case
+        #if y_true == 0:
+        lr = -K.log(y_pred) # negative sign because the loss should be a positive value
+        #else:
+        #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
 
         # compute the numerical gradient of phi
         gradients = numerical_gradient_3D(phi)
@@ -264,11 +274,11 @@ class GANUnetModel64():
         gradients_sqr_sum = K.sum(gradients_sqr,
                                   axis=np.arange(1, len(gradients_sqr.shape)))
         #   ... and sqrt
-        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # compute lambda * (1 - ||grad||)^2 still for each single sample
-        gradient_penalty = K.square(1 - gradient_l2_norm)
+        #gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
-        return K.mean(gradient_penalty) + lr
+        return K.mean(gradients_sqr_sum) + lr
 
 
 
@@ -278,7 +288,8 @@ class GANUnetModel64():
     def train(self, epochs, batch_size=1, sample_interval=50):
 
         # Adversarial loss ground truths
-        disc_patch = (1,1,1,1) # discrimniator output
+        #disc_patch = (1,1,1,1) # discrimniator output
+        disc_patch = self.output_shape_d
         input_sz = 64
         output_sz = 24
         gap = input_sz - output_sz
@@ -328,8 +339,6 @@ class GANUnetModel64():
                 # ---------------------
                 #  Train Generator
                 # ---------------------
-
-                # Train the generator (z -> img is valid and img -> z is is invalid)
                 # Train the generator (to have the discriminator label samples as valid)
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
 
@@ -343,9 +352,17 @@ class GANUnetModel64():
                                                                         elapsed_time))
 
 
+                if self.DEBUG:
+                    self.write_log(self.callback, ['g_loss'], [g_loss], batch_i)
+                    self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
+
+                # If at save interval => save generated image samples
+                if batch_i % sample_interval == 0:
+                    self.sample_images(epoch, batch_i)
+
                 # If at save interval => save generated image samples
             #if epoch % sample_interval == 0
-            self.sample_images(epoch, batch_i) #save by the end of each epoch
+            #self.sample_images(epoch, batch_i) #save by the end of each epoch
 
 
     def write_log(self, callback, names, logs, batch_no):
@@ -367,8 +384,8 @@ class GANUnetModel64():
         imgs_T = self.data_loader.img_template
         imgs_T_mask = self.data_loader.mask_template
 
-        imgs_S = imgs_S * imgs_S_mask
-        imgs_T = imgs_T * imgs_T_mask
+        #imgs_S = imgs_S * imgs_S_mask
+        #imgs_T = imgs_T * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
 
@@ -432,7 +449,7 @@ if __name__ == '__main__':
     #K.set_session(sess)
 
     gan = GANUnetModel64()
-    gan.train(epochs=1000, batch_size=1, sample_interval=200)
+    gan.train(epochs=200, batch_size=1, sample_interval=200)
 
 
 
