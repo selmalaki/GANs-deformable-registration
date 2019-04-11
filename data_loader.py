@@ -12,7 +12,7 @@ __author__ = 'elmalakis'
 
 class DataLoader():
 
-    def __init__(self, batch_sz = 16, sample_type = 'fly'):
+    def __init__(self, batch_sz = 16, dataset_name ='fly'):
         """
         :param batch_sz: int - size of the batch
         :param sampletype: string - 'fly' or 'fish'
@@ -27,12 +27,12 @@ class DataLoader():
         self.imgs_test = []
         self.masks_test = []
 
-        if sample_type is 'fly':
+        if dataset_name is 'fly':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz)
-        elif sample_type is 'fish':
+        elif dataset_name is 'fish':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
         else:
-            raise ValueError('Data of type %s is not available'%(sample_type))
+            raise ValueError('Data of type %s is not available' % (dataset_name))
 
 
 
@@ -144,9 +144,9 @@ class DataLoader():
         imgs_test = []
         masks_test = []
 
-
-        filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
-        img_pp = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
+        filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed_convexhull/'
+        #filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
+        img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
                   filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
                   filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
                   filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
@@ -162,10 +162,10 @@ class DataLoader():
                   filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
                   filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
                   filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
+                  filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
+                  #filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd', # remove the last 3 for testing
+                  #filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
+                  #filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
                   ]
 
         mask_pp = [filepath + '20161102_32_C1_Scope_1_C1_down_result_mask.nrrd',
@@ -184,12 +184,35 @@ class DataLoader():
                    filepath + '20170223_32_A6_Scope_2_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E1_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E2_Scope_3_C1_down_result_mask.nrrd',
-                   filepath + '20170223_32_E3_Scope_3_C1_down_result_mask.nrrd',
-                   filepath + '20170301_31_B1_Scope_1_C1_down_result_mask.nrrd',
-                   filepath + '20170301_31_B3_Scope_1_C1_down_result_mask.nrrd',
-                   filepath + '20170301_31_B5_Scope_1_C1_down_result_mask.nrrd'
-
+                   filepath + '20170223_32_E3_Scope_3_C1_down_result_mask.nrrd'
+                   #filepath + '20170301_31_B1_Scope_1_C1_down_result_mask.nrrd',
+                   #filepath + '20170301_31_B3_Scope_1_C1_down_result_mask.nrrd',
+                   #filepath + '20170301_31_B5_Scope_1_C1_down_result_mask.nrrd'
                    ]
+
+        filepath_un = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/proc/'
+        img_pp = [filepath_un + '20161102_32_C1_Scope_1_C1_down_result.nrrd',
+                  filepath_un + '20161102_32_C3_Scope_4_C1_down_result.nrrd',
+                  filepath_un + '20161102_32_D1_Scope_1_C1_down_result.nrrd',
+                  filepath_un + '20161102_32_D2_Scope_1_C1_down_result.nrrd',
+                  filepath_un + '20161102_32_E1_Scope_1_C1_down_result.nrrd',
+                  filepath_un + '20161102_32_E3_Scope_4_C1_down_result.nrrd',
+                  filepath_un + '20161220_31_I1_Scope_2_C1_down_result.nrrd',
+                  filepath_un + '20161220_31_I2_Scope_6_C1_down_result.nrrd',
+                  filepath_un + '20161220_31_I3_Scope_6_C1_down_result.nrrd',
+                  filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
+                  filepath_un + '20170223_32_E3_Scope_3_C1_down_result.nrrd'
+                  # filepath_un+ '20170301_31_B1_Scope_1_C1_down_result.nrrd', # remove the last 3 for testing
+                  # filepath_un+ '20170301_31_B3_Scope_1_C1_down_result.nrrd',
+                  # filepath_un+ '20170301_31_B5_Scope_1_C1_down_result.nrrd'
+                  ]
+
 
         print('----- loading data file -----')
         for i in range(len(img_pp)):
@@ -205,10 +228,11 @@ class DataLoader():
             imgs.append(curr_img)
 
         # template
-        img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_normalized.nrrd')
+        filepath_t = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
+        img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
         img_template = np.float32(img_template)
         img_template = (img_template - np.mean(img_template)) / np.std(img_template)
-        mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask.nrrd')
+        mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
 
         # TODO: save test images
         # test is subject 16, 17, 18 after popping subject 4 the indices are 14, 15, 16 (Indices start at 0)
@@ -253,7 +277,7 @@ class DataLoader():
         return idx, test_image, test_mask
 
 
-    def load_batch(self, sample_type = 'fly'):
+    def load_batch(self, dataset_name ='fly'):
 
         for i in range(self.n_batches - 1):
             #print('----- loading a batch -----')
@@ -272,9 +296,9 @@ class DataLoader():
             while num_crop < self.batch_sz:
                 x = np.random.randint(0, img_for_crop.shape[0] - self.crop_sz[0])
                 y = np.random.randint(0, img_for_crop.shape[1] - self.crop_sz[1])
-                if sample_type is 'fish': z = 0 # take the whole dimension of Z
+                if dataset_name is 'fish': z = 0 # take the whole dimension of Z
                 else: z = np.random.randint(0, img_for_crop.shape[2] - self.crop_sz[2])
-                # crop in the x-y dimension only and use the all the slices
+                # crop in the x-y dimension only and use the all the slices for fish
                 cropped_img = img_for_crop[x:x+self.crop_sz[0], y:y+self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_img_template = self.img_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_mask = mask_for_crop[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
@@ -293,13 +317,13 @@ class DataLoader():
                     batch_mask[num_crop,:,:,:,0] = cropped_mask
 
                     # filter the image with the mask
-                    batch_img = batch_img * batch_mask
+                    # batch_img = batch_img * batch_mask
 
                     batch_img_template[num_crop,:,:,:,0] = cropped_img_template
                     batch_mask_template[num_crop,:,:,:,0] = cropped_mask_template
 
                     # filter the template with the mask
-                    batch_img_template = batch_img_template * batch_mask_template
+                    #batch_img_template = batch_img_template * batch_mask_template
 
                     num_crop += 1
 
