@@ -20,8 +20,7 @@ class PreProcessing():
     def __init__(self):
         pass
 
-    def preprocess(self, path):
-        os.makedirs(path + 'preprocessed/', exist_ok=True)
+    def preprocess(self, path, outdir):
         filesdir = path + 'proc/'
         template = 'JRC2018_lo.nrrd'
         filelist = ['20161102_32_C1_Scope_1_C1_down_result.nrrd',
@@ -46,10 +45,10 @@ class PreProcessing():
                     '20170301_31_B5_Scope_1_C1_down_result.nrrd']
 
         for f in filelist:
-            self.create_mask(path=filesdir + f, outdir=path + 'preprocessed/')
+            self.create_mask(path=filesdir + f, outdir=outdir)
             print('--- Done ' + f + ' ---')
 
-        self.create_mask(path=path + template, outdir=path + 'preprocessed/')
+        self.create_mask(path=path + template, outdir=outdir)
 
 
     def create_mask(self, path, outdir):
@@ -69,13 +68,13 @@ class PreProcessing():
         mask = morph.binary_dilation(blobs, iterations=2)
         # Closing remove pepper spots and connects small bright cracks. Close up dark gaps between bright features
         mask = morph.binary_closing(mask, iterations=2)
-        #mask = morph.binary_fill_holes(mask)
+        mask = morph.binary_fill_holes(mask)
+
         # Create a convex hull - Not the fastest way
-        for z in range(0, mask.shape[2]):
-            mask[:,:,z] = skimorph.convex_hull_image(mask[:,:,z])
+        #for z in range(0, mask.shape[2]):
+        #    mask[:,:,z] = skimorph.convex_hull_image(mask[:,:,z])
+
         #mask = spatial.ConvexHull(mask, incremental = True)
-        # unsharpen the mask using median filter
-        mask = ndimage.median_filter(mask, size = 20)
         # convert to 0 and 1 float
         mask = measure.label(mask, background=0.0).astype('float32')
         mask[ mask > 0] = 1
@@ -115,13 +114,12 @@ class PreProcessing():
 
 if __name__ == '__main__':
     path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-    os.makedirs(path + 'preprocessed/', exist_ok=True)
-    outdir = path+'preprocessed/'
-    outdir_test = path+'preprocessed/test_masks/'
+    os.makedirs(path + 'preprocessed_convexhull/', exist_ok=True)
+    outdir = path+'preprocessed_convexhull/'
+    #outdir_test = path+'preprocessed/test_masks/'
     pp = PreProcessing()
-    #pp.preprocess(path)
-    pp.create_mask(path + 'proc/20161102_32_C1_Scope_1_C1_down_result.nrrd', outdir=outdir_test)
-
+    pp.preprocess(path, outdir)
+    #pp.create_mask(path + 'proc/20161102_32_C1_Scope_1_C1_down_result.nrrd', outdir=outdir_test)
     #preprocess.create_mask(path + 'proc/20161102_32_C1_Scope_1_C1_down_result.nrrd', outdir=outdir)
     #preprocess.create_mask(path + 'JRC2018_lo.nrrd')
     print('--- Done ---')
