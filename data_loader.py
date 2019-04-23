@@ -10,9 +10,11 @@ from skimage.transform import resize
 __author__ = 'elmalakis'
 
 
+DEBUG = 1
+
 class DataLoader():
 
-    def __init__(self, batch_sz = 16, dataset_name ='fly'):
+    def __init__(self, batch_sz = 16, dataset_name ='fly', use_hist_equilized_data = False):
         """
         :param batch_sz: int - size of the batch
         :param sampletype: string - 'fly' or 'fish'
@@ -28,7 +30,7 @@ class DataLoader():
         self.masks_test = []
 
         if dataset_name is 'fly':
-            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz)
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz, use_hist_equilized_data)
         elif dataset_name is 'fish':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
         else:
@@ -130,7 +132,7 @@ class DataLoader():
         return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
 
 
-    def prepare_fly_data(self, batch_sz):
+    def prepare_fly_data(self, batch_sz, use_hist_equilized_data=False):
         self.batch_sz = batch_sz
         self.n_gpus = 1
         self.crop_sz = (64, 64, 64)
@@ -138,6 +140,7 @@ class DataLoader():
 
         imgs = []
         masks = []
+
         img_template = None
         mask_template = None
 
@@ -146,27 +149,53 @@ class DataLoader():
 
         filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed_convexhull/'
         #filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
-        img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
-                  filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
-                  filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
-                  filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
-                  filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
-                  filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
-                  filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
-                  filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
-                  #filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd', # remove the last 3 for testing
-                  #filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
-                  #filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
-                  ]
+        if use_hist_equilized_data:
+            img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
+                      filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
+                      filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
+                      filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
+                      filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
+                      filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
+                      filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
+                      filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
+                      filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
+                      filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
+                      filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
+                      #filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd', # remove the last 3 for testing
+                      #filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
+                      #filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
+                      ]
+
+        else:
+            filepath_un = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/proc/'
+            img_pp = [filepath_un + '20161102_32_C1_Scope_1_C1_down_result.nrrd',
+                      filepath_un + '20161102_32_C3_Scope_4_C1_down_result.nrrd',
+                      filepath_un + '20161102_32_D1_Scope_1_C1_down_result.nrrd',
+                      filepath_un + '20161102_32_D2_Scope_1_C1_down_result.nrrd',
+                      filepath_un + '20161102_32_E1_Scope_1_C1_down_result.nrrd',
+                      filepath_un + '20161102_32_E3_Scope_4_C1_down_result.nrrd',
+                      filepath_un + '20161220_31_I1_Scope_2_C1_down_result.nrrd',
+                      filepath_un + '20161220_31_I2_Scope_6_C1_down_result.nrrd',
+                      filepath_un + '20161220_31_I3_Scope_6_C1_down_result.nrrd',
+                      filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
+                      filepath_un + '20170223_32_E3_Scope_3_C1_down_result.nrrd'
+                      # filepath_un+ '20170301_31_B1_Scope_1_C1_down_result.nrrd', # remove the last 3 for testing
+                      # filepath_un+ '20170301_31_B3_Scope_1_C1_down_result.nrrd',
+                      # filepath_un+ '20170301_31_B5_Scope_1_C1_down_result.nrrd'
+                      ]
+
 
         mask_pp = [filepath + '20161102_32_C1_Scope_1_C1_down_result_mask.nrrd',
                    filepath + '20161102_32_C3_Scope_4_C1_down_result_mask.nrrd',
@@ -190,49 +219,47 @@ class DataLoader():
                    #filepath + '20170301_31_B5_Scope_1_C1_down_result_mask.nrrd'
                    ]
 
-        filepath_un = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/proc/'
-        img_pp = [filepath_un + '20161102_32_C1_Scope_1_C1_down_result.nrrd',
-                  filepath_un + '20161102_32_C3_Scope_4_C1_down_result.nrrd',
-                  filepath_un + '20161102_32_D1_Scope_1_C1_down_result.nrrd',
-                  filepath_un + '20161102_32_D2_Scope_1_C1_down_result.nrrd',
-                  filepath_un + '20161102_32_E1_Scope_1_C1_down_result.nrrd',
-                  filepath_un + '20161102_32_E3_Scope_4_C1_down_result.nrrd',
-                  filepath_un + '20161220_31_I1_Scope_2_C1_down_result.nrrd',
-                  filepath_un + '20161220_31_I2_Scope_6_C1_down_result.nrrd',
-                  filepath_un + '20161220_31_I3_Scope_6_C1_down_result.nrrd',
-                  filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
-                  filepath_un + '20170223_32_E3_Scope_3_C1_down_result.nrrd'
-                  # filepath_un+ '20170301_31_B1_Scope_1_C1_down_result.nrrd', # remove the last 3 for testing
-                  # filepath_un+ '20170301_31_B3_Scope_1_C1_down_result.nrrd',
-                  # filepath_un+ '20170301_31_B5_Scope_1_C1_down_result.nrrd'
-                  ]
 
 
-        print('----- loading data file -----')
-        for i in range(len(img_pp)):
-            # images normalize
-            curr_img, img_header = nrrd.read(img_pp[i])
-            curr_img = np.float32(curr_img)
-            curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
-            # masks 1: interesting value, 0: not interesting value
-            curr_mask, mask_header = nrrd.read(mask_pp[i])
-            curr_mask = np.float32(curr_mask)
+        if use_hist_equilized_data:
+            print('----- loading histogram equalized data files -----')
+            for i in range(len(img_pp_normalized)):
+                # images normalize
+                curr_img, img_header = nrrd.read(img_pp_normalized[i])
+                curr_img = np.float32(curr_img)
+                #curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img) #already normalized
+                # masks 1: interesting value, 0: not interesting value
+                curr_mask, mask_header = nrrd.read(mask_pp[i])
+                curr_mask = np.float32(curr_mask)
+                masks.append(curr_mask)
+                imgs.append(curr_img)
 
-            masks.append(curr_mask)
-            imgs.append(curr_img)
+            # template
+            img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_normalized.nrrd')
+            img_template = np.float32(img_template)
+            #img_template = (img_template - np.mean(img_template)) / np.std(img_template) #already normalized
+            mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask.nrrd')
 
-        # template
-        filepath_t = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
-        img_template = np.float32(img_template)
-        img_template = (img_template - np.mean(img_template)) / np.std(img_template)
-        mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
+        else:
+            print('----- loading normal data files -----')
+            for i in range(len(img_pp)):
+                # images normalize
+                curr_img, img_header = nrrd.read(img_pp[i])
+                curr_img = np.float32(curr_img)
+                curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+                # masks 1: interesting value, 0: not interesting value
+                curr_mask, mask_header = nrrd.read(mask_pp[i])
+                curr_mask = np.float32(curr_mask)
+                masks.append(curr_mask)
+                imgs.append(curr_img)
+
+            # template
+            filepath_t = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
+            img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
+            img_template = np.float32(img_template)
+            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
+            mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
+
 
         # TODO: save test images
         # test is subject 16, 17, 18 after popping subject 4 the indices are 14, 15, 16 (Indices start at 0)
@@ -312,7 +339,7 @@ class DataLoader():
                     is_include = True
 
                 if is_include:
-                    #print('include this batch %d' %(num_crop))
+                    if DEBUG: print('include this batch %d, %d, %d' %(x, y, z))
                     batch_img[num_crop,:,:,:,0] = cropped_img
                     batch_mask[num_crop,:,:,:,0] = cropped_mask
 
@@ -327,7 +354,26 @@ class DataLoader():
 
                     num_crop += 1
 
-            # TODO: data augmentation if needed
+            # data augmentation
+            x_flip = np.random.randint(2, size=self.batch_sz)
+            z_flip = np.random.randint(2, size=self.batch_sz)
+            rot_angle = np.random.randint(4, size=self.batch_sz)
+            for j in range(self.batch_sz):
+                if x_flip[j]:
+                    batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=0)
+                    batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=0)
+                    batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=0)
+                    batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=0)
+                if z_flip[j]:
+                    batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=2)
+                    batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=2)
+                    batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=2)
+                    batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=2)
+                if rot_angle[j]:
+                    batch_img[j, :, :, :, 0] = np.rot90(batch_img[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    batch_mask[j, :, :, :, 0] = np.rot90(batch_mask[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    batch_img_template[j, :, :, :, 0] = np.rot90(batch_img_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    batch_mask_template[j, :, :, :, 0] = np.rot90(batch_mask_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
 
             yield batch_img, batch_img_template
 
