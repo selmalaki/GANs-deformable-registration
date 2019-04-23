@@ -60,7 +60,7 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         floors = []
         ceils = []
 
-        index_order = [0, 1, 2] if indexing == 'ijk' else [2, 1, 0]
+        index_order = [0, 1, 2] if indexing == 'ijk' else [1, 0, 2]
         unstacked_query_points = array_ops.unstack(query_points, axis=2)
 
         for dim in index_order:
@@ -155,7 +155,7 @@ def numerical_gradient_3D(phi):
         G: A 5-D float `Tensor` with shape`[batch, height, width, depth, channels]`
         and same type as input phi.
     """
-    DEBUG = 1
+    DEBUG = 0
     _, Nx, Ny, Nz, _ = phi.shape.as_list()
     if DEBUG: phi = K.print_tensor(phi, message='phi is:')
     # ... calculates the central difference for interior data points --> like Matlab: gradient(F)
@@ -205,7 +205,7 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     Apply a non-linear warp to the image, where the warp is specified by a dense
     flow field of offset vectors that define the correspondences of pixel values
-    in the output image back to locations in the  source image. Specifically, the
+    in the output image back to locations in the source image. Specifically, the
     pixel value at output[b, j, i, k, c] is
     images[b, j - flow[b, j, i, k, 0], i - flow[b, j, i, k, 1], k - flow[b, j, i, k, 2], c].
     The locations specified by this formula do not necessarily map to an int
