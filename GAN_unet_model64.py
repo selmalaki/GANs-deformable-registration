@@ -12,7 +12,7 @@ from keras.layers.advanced_activations import LeakyReLU, ReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
 
 from keras.optimizers import Adam
-from keras.models import Model
+from keras.models import Model, Sequential
 
 import matplotlib.pyplot as plt
 from functools import partial
@@ -31,6 +31,7 @@ class GANUnetModel64():
 
     def __init__(self):
 
+        K.set_image_data_format('channels_last')  # set format
         self.DEBUG = 1
 
         self.crop_size_g = (64, 64, 64)
@@ -41,6 +42,7 @@ class GANUnetModel64():
         self.input_shape_d = self.crop_size_d + (self.channels,)
         self.output_shape_g = (24, 24, 24) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
         self.output_shape_d = (6, 6, 6) + (self.channels,)
+        self.output_shape_d_v2 = (2, 2, 2) + (self.channels,)
 
         self.batch_sz = 4 # for testing locally to avoid memory allocation
         self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
@@ -49,14 +51,18 @@ class GANUnetModel64():
         self.gf = 64
         self.df = 64
 
-        optimizer = Adam(0.001, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        # Train the discriminator faster than the generator
+        #optimizerD = Adam(0.001, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        self.decay = 0.5
+        self.iterations_decay = 50
+        self.learning_rate = 0.001
+        optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
         self.discriminator.compile(loss='binary_crossentropy',
-            optimizer=optimizer,
+            optimizer=optimizerG,
             metrics=['accuracy'])
-
 
         # Build the generator
         self.generator = self.build_generator()
@@ -85,11 +91,14 @@ class GANUnetModel64():
         self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
-        valid = self.discriminator([warped_S, img_R])
+        validity = self.discriminator([warped_S, img_T])
+        #valid = self.discriminator([img_R, img_T])
 
-        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=valid)
-        self.combined.compile(loss=partial_gp_loss,
-                              optimizer=optimizer)
+        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
+        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
+        self.combined.compile(loss=[partial_gp_loss, 'mae'],
+                              loss_weights=[1, 100],
+                              optimizer=optimizerG)
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
@@ -207,11 +216,13 @@ class GANUnetModel64():
                 d = BatchNormalization(name=name+'_bn')(d)
             return d
 
-        img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24
-        img_B = Input(shape=self.input_shape_d, name='input_img_B')             # 24x24x24
+        img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 64x64x64 template
+
+        img_T_cropped = Cropping3D(cropping=20)(img_T)  # 24x24x24
 
         # Concatenate image and conditioning image by channels to produce input
-        combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_B])
+        combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
 
         d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
         d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
@@ -223,15 +234,46 @@ class GANUnetModel64():
 
         d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
 
-        # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally linear
         # ToDo: Use FC layer at the end like specified in the paper
         #validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
 
         # Use FC layer
-        #d6 = Flatten(input_shape=(1,1,1))(d5)
+        #d6 = Flatten(input_shape=(self.batch_sz,) + (6,6,6,512))(d5)
         validity = Dense(1, activation='sigmoid')(d5)
 
-        return Model([img_A, img_B], validity, name='discriminator_model')
+        return Model([img_A, img_T], validity, name='discriminator_model')
+
+
+    """
+    Discriminator Network v2
+    """
+    def build_discriminator_v2(self):
+
+        def d_layer(layer_input, filters, f_size=4, bn=True):
+            """Discriminator layer"""
+            d = Conv3D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
+            d = LeakyReLU(alpha=0.2)(d)
+            if bn:
+                d = BatchNormalization(momentum=0.8)(d)
+            return d
+
+        img_A =  Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 64x64x64 template
+
+        img_T_cropped = Cropping3D(cropping=20)(img_T)  # 24x24x24
+
+        # Concatenate image and conditioning image by channels to produce input
+        combined_imgs = Concatenate(axis=-1)([img_A, img_T_cropped])
+
+        d1 = d_layer(combined_imgs, self.df, bn=False)
+        d2 = d_layer(d1, self.df*2)
+        d3 = d_layer(d2, self.df*4)
+        d4 = d_layer(d3, self.df*8)
+
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid')(d4) # 2x2x2
+
+        return Model([img_A, img_T], validity, name='discriminator_model')
+
 
 
     """
@@ -241,11 +283,7 @@ class GANUnetModel64():
         img_S = Input(shape=self.input_shape_g, name='input_img_S_transform')  # 64x64x64
         phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 24x24x24
 
-        #TODO: Check if this affects the results
-        #img_S_downsampled = Cropping3D(cropping=4)(MaxPooling3D(pool_size=(2,2,2))(img_S)) # 24x24x24
         img_S_cropped = Cropping3D(cropping=20)(img_S)  # 24x24x24
-        # Put the warping function in a Lambda layer because it uses tensorflow
-        # phi_upsampled =  Cropping3D((4,4,4))(UpSampling3D(size=(3,3,3))(phi)) #64x64x64
         warped_S = Lambda(dense_image_warp_3D)([img_S_cropped, phi])
 
         return Model([img_S, phi], warped_S)
@@ -278,8 +316,8 @@ class GANUnetModel64():
         # compute lambda * (1 - ||grad||)^2 still for each single sample
         #gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
-        return K.mean(gradients_sqr_sum) + lr
-
+        #return K.mean(gradient_l2_norm) + lr
+        return gradients_sqr_sum + lr
 
 
     """
@@ -292,19 +330,19 @@ class GANUnetModel64():
         disc_patch = self.output_shape_d
         input_sz = 64
         output_sz = 24
-        gap = input_sz - output_sz
+        gap = int((input_sz - output_sz)/2)
 
         # hard labels
         validhard = np.ones((self.batch_sz,) + disc_patch)
         fakehard = np.zeros((self.batch_sz,) + disc_patch)
 
+        # hard labels with only one output
         #validhard = np.ones((self.batch_sz, 1))
         #fakehard = np.zeros((self.batch_sz, 1))
 
         # soft labels
-        #valid = 0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
-        #fake = 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
-
+        validsoft = 0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
+        fakesoft = 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
 
         start_time = datetime.datetime.now()
         for epoch in range(epochs):
@@ -322,7 +360,7 @@ class GANUnetModel64():
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
                 batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
-
+                batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
                 # take only (24,24,24) from the (64,64,64) size
                 batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
@@ -330,30 +368,34 @@ class GANUnetModel64():
                 batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
+                batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
+                                                                      0 + gap:0 + gap + output_sz,
+                                                                      0 + gap:0 + gap + output_sz, :]
 
-                # Train the discriminator (img -> z is valid, z -> img is fake)
-                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_sub], validhard)
-                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_sub], fakehard)
+                # Train the discriminator (R -> T is valid, S -> T is fake)
+                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
+                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # ---------------------
                 #  Train Generator
                 # ---------------------
-                # Train the generator (to have the discriminator label samples as valid)
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                # Train the generator (to fool the discriminator)
+                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [fakehard, validhard])
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
 
                 elapsed_time = datetime.datetime.now() - start_time
                 # Plot the progress
                 # Plot the progress
-                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] time: %s" % (epoch, epochs,
+                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] [comparing loss: %f] time: %s" % (epoch, epochs,
                                                                         batch_i, self.data_loader.n_batches,
                                                                         d_loss[0], 100*d_loss[1],
-                                                                        g_loss,
+                                                                        g_loss[0], g_loss[1],
                                                                         elapsed_time))
 
 
                 if self.DEBUG:
-                    self.write_log(self.callback, ['g_loss'], [g_loss], batch_i)
+                    self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
