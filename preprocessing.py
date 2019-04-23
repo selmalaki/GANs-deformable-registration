@@ -59,7 +59,10 @@ class PreProcessing():
         image, header = nrrd.read(path)
         image = self.normalize_intensity(image)
         image = self.hist_equalization(image)
-        nrrd.write(outdir+filename+ '_normalized.nrrd', image, header=header)
+        nrrd.write(outdir+filename+ '_histogram_normalized.nrrd', image, header=header)
+
+        normalized_image = (image - np.mean(image)) / np.std(image)
+        nrrd.write(outdir + filename + '_normalized.nrrd', normalized_image, header=header)
 
         val = filters.threshold_otsu(image)
         # convert to binary to speed up next processing
