@@ -44,8 +44,8 @@ class CycleGAN_model64():
 
         # Configure data loader
         self.dataset_name = 'fly'
-        self.batch_sz = 4 # for testing locally to avoid memory allocation
-        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
+        self.batch_sz = 16 # for testing locally to avoid memory allocation
+        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly', use_hist_equilized_data=True)
 
 
         # Calculate output shape of D (PatchGAN)
@@ -279,10 +279,11 @@ class CycleGAN_model64():
         # img_T_masked = np.ma.array(img_T, mask=img_T_mask)
         # img_T = (img_T - img_T_masked.mean()) / img_T_masked.std()
 
-        #nrrd.write(path + "generated_cyclegan/originalS_%d_%d_%d" % (epoch, batch_i, idx), img_S)
-        #nrrd.write(path + "generated_cyclegan/originalT_%d_%d" % (epoch, batch_i), img_T)
+        nrrd.write(path + "generated_cyclegan/originalS_%d_%d_%d" % (epoch, batch_i, idx), img_S)
+        nrrd.write(path + "generated_cyclegan/originalT_%d_%d" % (epoch, batch_i), img_T)
 
         predict_img = np.zeros(img_S.shape, dtype=img_S.dtype)
+        predict_templ = np.zeros(img_T.shape, dtype=img_T.dtype)
 
         input_sz = (64, 64, 64)
         step = (24, 24, 24)
@@ -304,7 +305,7 @@ class CycleGAN_model64():
 
                     # Translate images to the other domain
                     fake_B = self.g_AB.predict(patch_sub_img)   # subject to template
-                    #fake_A = self.g_BA.predict(patch_templ_img) # template to subject
+                    fake_A = self.g_BA.predict(patch_templ_img) # template to subject
                     # Translate back to original domain
                     #reconstr_A = self.g_BA.predict(fake_B)
                     #reconstr_B = self.g_AB.predict(fake_A)
@@ -312,11 +313,15 @@ class CycleGAN_model64():
                     predict_img[row:row + input_sz[0],
                                 col:col + input_sz[1],
                                 vol:vol + input_sz[2]] = fake_B[0, :, :, :, 0]
-                    # predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
+                    predict_templ[row:row + input_sz[0],
+                                col:col + input_sz[1],
+                                vol:vol + input_sz[2]] = fake_A[0, :, :, :, 0]
+
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_cyclegan/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_cyclegan/S2T_%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path + "generated_cyclegan/T2S_%d_%d_%d" % (epoch, batch_i, idx), predict_templ)
 
         file_name = 'gan_network'
         # save the whole network
