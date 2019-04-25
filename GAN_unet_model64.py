@@ -59,7 +59,7 @@ class GANUnetModel64():
         optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
-        self.discriminator = self.build_discriminator()
+        self.discriminator = self.build_discriminator_v2()
         self.discriminator.compile(loss='binary_crossentropy',
             optimizer=optimizerG,
             metrics=['accuracy'])
@@ -94,11 +94,12 @@ class GANUnetModel64():
         validity = self.discriminator([warped_S, img_T])
         #valid = self.discriminator([img_R, img_T])
 
-        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
-        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
-        self.combined.compile(loss=[partial_gp_loss, 'mae'],
-                              loss_weights=[1, 100],
-                              optimizer=optimizerG)
+        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
+        self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
+        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
+        #self.combined.compile(loss=[partial_gp_loss, 'mae'],
+        #                      loss_weights=[1, 100],
+        #                      optimizer=optimizerG)
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
@@ -127,10 +128,13 @@ class GANUnetModel64():
                            padding=padding,
                            use_bias=use_bias,
                            name=name + '_conv3d')(input_tensor)
+            # if batch_normalization:
+            #     layer = BatchNormalization(name=name+'_bn')(layer)
+            #layer = Activation('relu', name=name+'_actrelu')(layer)
+            layer = LeakyReLU(alpha=0.2, name=name+'_actleakyrelu')(layer)
+            # Add BN after activation
             if batch_normalization:
-                layer = BatchNormalization(name=name+'_bn')(layer)
-            layer = Activation('relu', name=name+'_actrelu')(layer)
-
+                layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
             return layer
 
 
@@ -151,9 +155,13 @@ class GANUnetModel64():
                            padding=padding,
                            use_bias=use_bias,
                            name=name + '_conv3d')(layer)
+            # if batch_normalization:
+            #     layer = BatchNormalization(name=name+'_bn')(layer)
+            #layer = Activation('relu', name=name+'_actrelu')(layer)
+            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
+            # BN after activation
             if batch_normalization:
-                layer = BatchNormalization(name=name+'_bn')(layer)
-            layer = Activation('relu', name=name+'_actrelu')(layer)
+                layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
 
             return layer
 
@@ -197,7 +205,7 @@ class GANUnetModel64():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi')(up1)                 # 24x24x24
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)                 # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -208,12 +216,12 @@ class GANUnetModel64():
     """
     def build_discriminator(self):
 
-        def d_layer(layer_input, filters, f_size=3, bn=False,  name=''): #change the bn to False
+        def d_layer(layer_input, filters, f_size=3, bn=True, scale=True,  name=''): #change the bn to False
             """Discriminator layer"""
             d = Conv3D(filters, kernel_size=f_size, strides=1, padding='same', name=name+'_conv3d')(layer_input)
-            d = ReLU(name=name+'_relu')(d)
+            d = LeakyReLU(alpha=0.2, name=name+'_leakyrelu')(d)
             if bn:
-                d = BatchNormalization(name=name+'_bn')(d)
+                d = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(d)
             return d
 
         img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
@@ -249,12 +257,12 @@ class GANUnetModel64():
     """
     def build_discriminator_v2(self):
 
-        def d_layer(layer_input, filters, f_size=4, bn=True):
+        def d_layer(layer_input, filters, f_size=4, bn=True, name=''):
             """Discriminator layer"""
-            d = Conv3D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
-            d = LeakyReLU(alpha=0.2)(d)
+            d = Conv3D(filters, kernel_size=f_size, strides=2, padding='same', name=name+'_conv3d')(layer_input)
+            d = LeakyReLU(alpha=0.2, name=name+'_leakyrelu')(d)
             if bn:
-                d = BatchNormalization(momentum=0.8)(d)
+                d = BatchNormalization(momentum=0.8, name=name+'_bn')(d)
             return d
 
         img_A =  Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
@@ -265,12 +273,12 @@ class GANUnetModel64():
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1)([img_A, img_T_cropped])
 
-        d1 = d_layer(combined_imgs, self.df, bn=False)
-        d2 = d_layer(d1, self.df*2)
-        d3 = d_layer(d2, self.df*4)
-        d4 = d_layer(d3, self.df*8)
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')
+        d2 = d_layer(d1, self.df*2, name='d2')
+        d3 = d_layer(d2, self.df*4, name='d3')
+        d4 = d_layer(d3, self.df*8, name='d4')
 
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid')(d4) # 2x2x2
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='disc_sig')(d4) # 2x2x2
 
         return Model([img_A, img_T], validity, name='discriminator_model')
 
@@ -298,7 +306,7 @@ class GANUnetModel64():
         """
         # when ytrue = 0 but the discriminator give ypred =1 then it should be a small loss for the generator case
         #if y_true == 0:
-        lr = -K.log(y_pred) # negative sign because the loss should be a positive value
+        lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
         #else:
         #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
 
@@ -327,7 +335,7 @@ class GANUnetModel64():
 
         # Adversarial loss ground truths
         #disc_patch = (1,1,1,1) # discrimniator output
-        disc_patch = self.output_shape_d
+        disc_patch = self.output_shape_d_v2
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)
@@ -340,9 +348,12 @@ class GANUnetModel64():
         #validhard = np.ones((self.batch_sz, 1))
         #fakehard = np.zeros((self.batch_sz, 1))
 
-        # soft labels
-        validsoft = 0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
-        fakesoft = 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
+        # soft labels only smooth the labels of postive samples
+        # https://arxiv.org/abs/1701.00160
+        # https://github.com/soumith/ganhacks/issues/41
+        smooth = 0.1 # validhard -smooth
+        validsoft =  0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
+        #fakesoft =  0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
 
         start_time = datetime.datetime.now()
         for epoch in range(epochs):
@@ -350,9 +361,15 @@ class GANUnetModel64():
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
+                assert not np.any(np.isnan(batch_img))
+                assert not np.any(np.isnan(batch_img_template))
+
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
+                assert not np.any(np.isnan(phi))
+
                 # deformable transformation
                 transform = self.transformation.predict([batch_img, phi])     #24x24x24
+                assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
@@ -372,30 +389,45 @@ class GANUnetModel64():
                                                                       0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz, :]
 
+                assert not np.any(np.isnan(batch_img_sub))
+                assert not np.any(np.isnan(batch_ref_sub))
+                assert not np.any(np.isnan(batch_temp_sub))
+
                 # Train the discriminator (R -> T is valid, S -> T is fake)
-                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
-                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
+                # Noisy and soft labels
+                noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
+                if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validsoft)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
+                else:
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validsoft)
+
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # ---------------------
                 #  Train Generator
                 # ---------------------
                 # Train the generator (to fool the discriminator)
-                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [fakehard, validhard])
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
 
                 elapsed_time = datetime.datetime.now() - start_time
-                # Plot the progress
-                # Plot the progress
-                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] [comparing loss: %f] time: %s" % (epoch, epochs,
+                # print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] [comparing loss: %f] time: %s" % (epoch, epochs,
+                #                                                         batch_i, self.data_loader.n_batches,
+                #                                                         d_loss[0], 100*d_loss[1],
+                #                                                         g_loss[0], g_loss[1],
+                #                                                         elapsed_time))
+
+                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f]  time: %s" % (epoch, epochs,
                                                                         batch_i, self.data_loader.n_batches,
                                                                         d_loss[0], 100*d_loss[1],
-                                                                        g_loss[0], g_loss[1],
+                                                                        g_loss,
                                                                         elapsed_time))
 
-
                 if self.DEBUG:
-                    self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
+                    #self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
+                    self.write_log(self.callback, ['g_loss'], [g_loss], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
