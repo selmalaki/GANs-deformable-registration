@@ -239,8 +239,12 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     # The flow is defined on the image grid. Turn the flow into a list of query
     # points in the grid space.
-    grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
-    stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+    #grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+    #stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+
+    grid_i, grid_j, grid_k = array_ops.meshgrid(math_ops.range(height), math_ops.range(width), math_ops.range(depth), indexing='ij')
+    stacked_grid = math_ops.cast(array_ops.stack([grid_i, grid_j, grid_k], axis=3), flow.dtype)
+
     batched_grid = array_ops.expand_dims(stacked_grid, axis=0) #add the batch dim on axis 0
 
     query_points_on_grid = batched_grid - flow
@@ -251,7 +255,7 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
     if DEBUG: query_points_flattened = K.print_tensor(query_points_flattened, message="query_points_flattened is:")
     # Compute values at the query points, then reshape the result back to the
     # image grid.
-    interpolated = interpolate_trilinear(image, query_points_flattened)
+    interpolated = interpolate_trilinear(image, query_points_flattened, indexing='ijk')
     if DEBUG: interpolated = K.print_tensor(interpolated, message='interpolated is:')
     interpolated = array_ops.reshape(interpolated,
                                      [batch_size, height, width, depth, channels])
