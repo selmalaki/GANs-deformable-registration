@@ -109,7 +109,7 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         #     with ops.name_scope('gather-' + name):
         #         # map a 3d coordinates to a single number
         #         # https://stackoverflow.com/questions/10903149/how-do-i-compute-the-linear-index-of-a-3d-coordinate-and-vice-versa
-        #         linear_coordinates = batch_offsets + x_coords + y_coords * width + z_coords * (width*height)
+        #         linear_coordinates = batch_offsets + x_coords*(width) + y_coords *(width*height) + z_coords
         #         gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
         #         return array_ops.reshape(gathered_values,
         #                                  [batch_size, num_queries, channels])
