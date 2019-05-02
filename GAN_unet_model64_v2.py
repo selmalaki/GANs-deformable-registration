@@ -22,7 +22,7 @@ import nrrd
 import os
 
 from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
-from ImageRegistrationGANs.image_warping import dense_image_warp_3D_dipy
+from ImageRegistrationGANs.image_warping import dense_image_warp_3D_dipy, dense_image_warp_3D_scikit
 from ImageRegistrationGANs.data_loader import DataLoader
 
 __author__ = 'elmalakis'
@@ -60,16 +60,16 @@ class GANUnetModel64_v2():
         optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
-        self.discriminator = self.build_discriminator_v2()
-        self.discriminator.compile(loss='binary_crossentropy',
-            optimizer=optimizerG,
-            metrics=['accuracy'])
+        self.discriminator = self.build_discriminator()
+        self.discriminator.compile(loss = 'binary_crossentropy',
+                                   optimizer=optimizerG,
+                                   metrics=['accuracy'])
 
         # Build the generator
         self.generator = self.build_generator()
 
         # Build the deformable transformation layer
-        self.transformation = self.build_transformation()
+        #self.transformation = self.build_transformation()
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
@@ -88,7 +88,7 @@ class GANUnetModel64_v2():
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
-        self.transformation.trainable = False
+        #self.transformation.trainable = False
         self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
@@ -306,10 +306,9 @@ class GANUnetModel64_v2():
         Computes gradient penalty on phi to ensure smoothness
         """
         # when ytrue = 0 but the discriminator give ypred =1 then it should be a small loss for the generator case
-        #if y_true == 0:
-        lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
-        #else:
-        #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
+        Lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
+
+        #Lr = K.log(K.maximum(1-y_pred, 1e-15))
 
         # compute the numerical gradient of phi
         gradients = numerical_gradient_3D(phi)
@@ -326,17 +325,29 @@ class GANUnetModel64_v2():
         #gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
         #return K.mean(gradient_l2_norm) + lr
-        return gradients_sqr_sum + lr
+        return gradients_sqr_sum + Lr
+
+
+    def discriminator_loss(self, y_true, y_pred):
+        if y_true ==1:
+            Ld = K.log(1-y_pred)
+        else: #y_true=0
+            Ld = K.log(y_pred)
+
+        return Ld
 
 
     """
     Training
     """
     def train(self, epochs, batch_size=1, sample_interval=50):
-
+        DEBUG =1
+        path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
+        os.makedirs(path+'generated/' , exist_ok=True)
         # Adversarial loss ground truths
         #disc_patch = (1,1,1,1) # discrimniator output
-        disc_patch = self.output_shape_d_v2
+        #disc_patch = self.output_shape_d_v2
+        disc_patch = self.output_shape_d
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)
@@ -370,12 +381,14 @@ class GANUnetModel64_v2():
 
                 # deformable transformation
                 #transform = self.transformation.predict([batch_img, phi])     #24x24x24
-                transform = dense_image_warp_3D_dipy(image=batch_img, flow=phi)
+                #transform = dense_image_warp_3D_dipy(image=batch_img, flow=phi)
+                transform = dense_image_warp_3D_scikit(image=batch_img, flow=phi)
                 assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
+
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
                 batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
@@ -402,11 +415,11 @@ class GANUnetModel64_v2():
                 # Noisy and soft labels
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validsoft)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
                     d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
-                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validsoft)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
@@ -424,9 +437,12 @@ class GANUnetModel64_v2():
                 #                                                         g_loss[0], g_loss[1],
                 #                                                         elapsed_time))
 
-                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f]  time: %s" % (epoch, epochs,
+                print ("[Epoch %d/%d] [Batch %d/%d] [D loss average: %f, acc average: %3d%%, D loss fake:%f, acc: %3d%%, D loss real: %f, acc: %3d%%] [G loss: %f]  time: %s"
+                                                                     % (epoch, epochs,
                                                                         batch_i, self.data_loader.n_batches,
                                                                         d_loss[0], 100*d_loss[1],
+                                                                        d_loss_fake[0], 100*d_loss_fake[1],
+                                                                        d_loss_real[0], 100*d_loss_real[1],
                                                                         g_loss,
                                                                         elapsed_time))
 
@@ -473,9 +489,13 @@ class GANUnetModel64_v2():
 
         gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
         start_time = datetime.datetime.now()
+
+
+
         for row in range(0, imgs_S.shape[0] - input_sz[0], step[0]):
             for col in range(0, imgs_S.shape[1] - input_sz[1], step[1]):
                 for vol in range(0, imgs_S.shape[2] - input_sz[2], step[2]):
+
                     patch_sub_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_S.dtype)
                     patch_templ_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_T.dtype)
 
@@ -488,12 +508,13 @@ class GANUnetModel64_v2():
 
                     patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
 
-                    patch_predict_warped = dense_image_warp_3D_dipy(patch_sub_img, patch_predict_phi)
+                    #patch_predict_warped = dense_image_warp_3D_dipy(patch_sub_img, patch_predict_phi)
+                    patch_predict_warped = dense_image_warp_3D_scikit(image=patch_sub_img, flow=patch_predict_phi)
 
-                    predict_img[row + gap[0]:row + gap[0] + step[0],
-                                col + gap[1]:col + gap[1] + step[1],
-                                vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
-                    # predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
+                    # predict_img[row + gap[0]:row + gap[0] + step[0],
+                    #             col + gap[1]:col + gap[1] + step[1],
+                    #             vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
+                    predict_img[row :row + step[0], col :col + step[1], vol:vol+step[2] ] = patch_predict_warped[0, :, :, :, 0]
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
