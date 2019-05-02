@@ -69,7 +69,7 @@ class GANUnetModel64_v2():
         self.generator = self.build_generator()
 
         # Build the deformable transformation layer
-        #self.transformation = self.build_transformation()
+        self.transformation = self.build_transformation()
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
@@ -80,7 +80,7 @@ class GANUnetModel64_v2():
         phi = self.generator([img_S, img_T])
 
         # Transform S
-        #warped_S = self.transformation([img_S, phi])
+        warped_S = self.transformation([img_S, phi])
 
         # Use Python partial to provide loss function with additional deformable field argument
         partial_gp_loss = partial(self.gradient_penalty_loss, phi=phi)
@@ -92,7 +92,7 @@ class GANUnetModel64_v2():
         self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
-        validity = self.discriminator([img_R, img_T])
+        validity = self.discriminator([warped_S, img_T])
         #valid = self.discriminator([img_R, img_T])
 
         self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
@@ -320,12 +320,12 @@ class GANUnetModel64_v2():
         gradients_sqr_sum = K.sum(gradients_sqr,
                                   axis=np.arange(1, len(gradients_sqr.shape)))
         #   ... and sqrt
-        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # compute lambda * (1 - ||grad||)^2 still for each single sample
         #gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
-        #return K.mean(gradient_l2_norm) + lr
-        return gradients_sqr_sum + Lr
+        return K.mean(gradient_l2_norm) + Lr
+        #return gradients_sqr_sum + Lr
 
 
     def discriminator_loss(self, y_true, y_pred):
@@ -380,9 +380,9 @@ class GANUnetModel64_v2():
                 assert not np.any(np.isnan(phi))
 
                 # deformable transformation
-                #transform = self.transformation.predict([batch_img, phi])     #24x24x24
+                transform = self.transformation.predict([batch_img, phi])     #24x24x24
                 #transform = dense_image_warp_3D_dipy(image=batch_img, flow=phi)
-                transform = dense_image_warp_3D_scikit(image=batch_img, flow=phi)
+                #transform = dense_image_warp_3D_scikit(image=batch_img, flow=phi)
                 assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
@@ -508,13 +508,14 @@ class GANUnetModel64_v2():
 
                     patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
 
+                    patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
                     #patch_predict_warped = dense_image_warp_3D_dipy(patch_sub_img, patch_predict_phi)
-                    patch_predict_warped = dense_image_warp_3D_scikit(image=patch_sub_img, flow=patch_predict_phi)
+                    #patch_predict_warped = dense_image_warp_3D_scikit(image=patch_sub_img, flow=patch_predict_phi)
 
-                    # predict_img[row + gap[0]:row + gap[0] + step[0],
-                    #             col + gap[1]:col + gap[1] + step[1],
-                    #             vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
-                    predict_img[row :row + step[0], col :col + step[1], vol:vol+step[2] ] = patch_predict_warped[0, :, :, :, 0]
+                    predict_img[row + gap[0]:row + gap[0] + step[0],
+                                col + gap[1]:col + gap[1] + step[1],
+                                vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
+                    #predict_img[row :row + step[0], col :col + step[1], vol:vol+step[2] ] = patch_predict_warped[0, :, :, :, 0]
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
