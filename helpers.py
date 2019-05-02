@@ -9,6 +9,7 @@ from tensorflow.python.framework import ops
 from tensorflow.python.ops import array_ops
 from tensorflow.python.ops import check_ops
 from tensorflow.python.ops import math_ops
+from tensorflow.python.ops import gen_math_ops
 
 
 __author__ = 'elmalakis'
@@ -129,13 +130,24 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
             # we perform 4 linear interpolation to compute a, b, c, and d using alpha[1],
             # then we compute e and f by interpolating a, b, c and d  using alpha[0],
             # and finally we find our sample point by interpolating e and f using alpha[2]
-            with ops.name_scope('alpha-a'): a = alphas[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
-            with ops.name_scope('alpha-b'): b = alphas[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
-            with ops.name_scope('alpha-c'): c = alphas[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
-            with ops.name_scope('alpha-d'): d = alphas[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
+            # with ops.name_scope('alpha-a'): a = alphas[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
+            # with ops.name_scope('alpha-b'): b = alphas[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
+            # with ops.name_scope('alpha-c'): c = alphas[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
+            # with ops.name_scope('alpha-d'): d = alphas[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
+            # with ops.name_scope('alpha-e'): e = alphas[0] * (b - a) + a
+            # with ops.name_scope('alpha-f'): f = alphas[0] * (d - c) + c
+            # with ops.name_scope('alpha-g'): g = alphas[2] * (f - e) + e
+
+            # 000 is at the top left
+
+            with ops.name_scope('alpha-a'): a = alphas[1] * (fy_cx_fz - fy_fx_fz) + fy_fx_fz
+            with ops.name_scope('alpha-b'): b = alphas[1] * (cy_cx_fz - cy_fx_fz) + cy_fx_fz
+            with ops.name_scope('alpha-c'): c = alphas[1] * (fy_cx_cz - fy_fx_cz) + fy_fx_cz
+            with ops.name_scope('alpha-d'): d = alphas[1] * (cy_cx_cz - cy_fx_cz) + cy_fx_cz
             with ops.name_scope('alpha-e'): e = alphas[0] * (b - a) + a
             with ops.name_scope('alpha-f'): f = alphas[0] * (d - c) + c
             with ops.name_scope('alpha-g'): g = alphas[2] * (f - e) + e
+
 
         return g
 
@@ -239,11 +251,8 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     # The flow is defined on the image grid. Turn the flow into a list of query
     # points in the grid space.
-    #grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
-    #stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
-
-    grid_i, grid_j, grid_k = array_ops.meshgrid(math_ops.range(height), math_ops.range(width), math_ops.range(depth), indexing='ij')
-    stacked_grid = math_ops.cast(array_ops.stack([grid_i, grid_j, grid_k], axis=3), flow.dtype)
+    grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+    stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
 
     batched_grid = array_ops.expand_dims(stacked_grid, axis=0) #add the batch dim on axis 0
 
@@ -252,6 +261,8 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     query_points_flattened = array_ops.reshape(query_points_on_grid,
                                                [batch_size, height * width * depth, 3])
+
+
     if DEBUG: query_points_flattened = K.print_tensor(query_points_flattened, message="query_points_flattened is:")
     # Compute values at the query points, then reshape the result back to the
     # image grid.
@@ -260,3 +271,8 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
     interpolated = array_ops.reshape(interpolated,
                                      [batch_size, height, width, depth, channels])
     return interpolated
+
+
+
+
+
