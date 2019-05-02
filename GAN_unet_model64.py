@@ -73,7 +73,7 @@ class GANUnetModel64():
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
         img_T = Input(shape=self.input_shape_g) # template image T
-        img_R = Input(shape=self.input_shape_d) # reference image R
+        #img_R = Input(shape=self.input_shape_d) # reference
 
         # By conditioning on T generate a warped transformation function of S
         phi = self.generator([img_S, img_T])
@@ -94,7 +94,8 @@ class GANUnetModel64():
         validity = self.discriminator([warped_S, img_T])
         #valid = self.discriminator([img_R, img_T])
 
-        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
+        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
+        self.combined = Model(inputs=[img_S, img_T], outputs=validity)
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
@@ -409,7 +410,8 @@ class GANUnetModel64():
                 #  Train Generator
                 # ---------------------
                 # Train the generator (to fool the discriminator)
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], validhard)
                 #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
 
                 elapsed_time = datetime.datetime.now() - start_time
@@ -419,11 +421,15 @@ class GANUnetModel64():
                 #                                                         g_loss[0], g_loss[1],
                 #                                                         elapsed_time))
 
-                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f]  time: %s" % (epoch, epochs,
-                                                                        batch_i, self.data_loader.n_batches,
-                                                                        d_loss[0], 100*d_loss[1],
-                                                                        g_loss,
-                                                                        elapsed_time))
+                print(
+                    "[Epoch %d/%d] [Batch %d/%d] [D loss average: %f, acc average: %3d%%, D loss fake:%f, acc: %3d%%, D loss real: %f, acc: %3d%%] [G loss: %f]  time: %s"
+                    % (epoch, epochs,
+                       batch_i, self.data_loader.n_batches,
+                       d_loss[0], 100 * d_loss[1],
+                       d_loss_fake[0], 100 * d_loss_fake[1],
+                       d_loss_real[0], 100 * d_loss_real[1],
+                       g_loss,
+                       elapsed_time))
 
                 if self.DEBUG:
                     #self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
