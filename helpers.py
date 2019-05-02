@@ -105,17 +105,27 @@ def interpolate_trilinear(grid, query_points, name='interpolate_trilinear', inde
         # batch, y, x and z coordinates are pulled into the first dimension.
         # Then we gather. Finally, we reshape the output back. It's possible this
         # code would be made simpler by using array_ops.gather_nd.
-        def gather(y_coords, x_coords, z_coords, name):
+        # def gather(y_coords, x_coords, z_coords, name):
+        #     with ops.name_scope('gather-' + name):
+        #         # map a 3d coordinates to a single number
+        #         # https://stackoverflow.com/questions/10903149/how-do-i-compute-the-linear-index-of-a-3d-coordinate-and-vice-versa
+        #         linear_coordinates = batch_offsets + x_coords + y_coords * width + z_coords * (width*height)
+        #         gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
+        #         return array_ops.reshape(gathered_values,
+        #                                  [batch_size, num_queries, channels])
+
+
+        def gather(i_coords, j_coords, k_coords, name):
             with ops.name_scope('gather-' + name):
-                # map a 3d coordinates to a single number
-                # https://stackoverflow.com/questions/10903149/how-do-i-compute-the-linear-index-of-a-3d-coordinate-and-vice-versa
-                linear_coordinates = batch_offsets + x_coords + y_coords * width + z_coords * (width*height)
+                # map the indices of a matrix to a 1-dim array
+                #https://stackoverflow.com/questions/14015556/how-to-map-the-indexes-of-a-matrix-to-a-1-dimensional-array-c/27084843
+                linear_coordinates = batch_offsets + i_coords*(width*height) + j_coords*(width) +  k_coords
                 gathered_values = array_ops.gather(flattened_grid, linear_coordinates)
                 return array_ops.reshape(gathered_values,
                                          [batch_size, num_queries, channels])
 
         # grab the pixel values in the 8 corners around each query point
-        # coordinates: y x z (rows(height), columns(width), depth)      # yxz
+        # coordinates: y x z (rows(height), columns(width), depth)      # yxz -> ijk
         fy_fx_fz = gather(floors[0], floors[1], floors[2], 'fy_fx_fz')  # 000
         fy_fx_cz = gather(floors[0], floors[1], ceils[2], 'fy_fx_cz')  # 001
         fy_cx_fz = gather(floors[0], ceils[1], floors[2], 'fy_cx_fz')  # 010
@@ -251,8 +261,11 @@ def dense_image_warp_3D(tensors, name='dense_image_warp'):
 
     # The flow is defined on the image grid. Turn the flow into a list of query
     # points in the grid space.
-    grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
-    stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+    #grid_x, grid_y, grid_z = array_ops.meshgrid(math_ops.range(width), math_ops.range(height), math_ops.range(depth))
+    #stacked_grid = math_ops.cast(array_ops.stack([grid_y, grid_x, grid_z], axis=3), flow.dtype)
+
+    grid_i, grid_j, grid_k = array_ops.meshgrid(math_ops.range(height), math_ops.range(width), math_ops.range(depth), indexing='ij')
+    stacked_grid = math_ops.cast(array_ops.stack([grid_i, grid_j, grid_k], axis=3), flow.dtype)
 
     batched_grid = array_ops.expand_dims(stacked_grid, axis=0) #add the batch dim on axis 0
 
