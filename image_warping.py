@@ -1,14 +1,18 @@
 import numpy as np
+import multiprocessing
+from skimage.transform import warp
+from joblib import Parallel, delayed
+
 
 
 def dense_image_warp_3D_dipy(image, flow):
     DEBUG = 0
 
     batch_size, height, width, depth, channels = (np.shape(image)[0],
-                                                np.shape(image)[1],
-                                                np.shape(image)[2],
-                                                np.shape(image)[3],
-                                                np.shape(image)[4])
+                                                  np.shape(image)[1],
+                                                  np.shape(image)[2],
+                                                  np.shape(image)[3],
+                                                  np.shape(image)[4])
     input_sz = 64
     output_sz = 24
     gap = int((input_sz - output_sz) / 2)
@@ -187,3 +191,50 @@ def _interpolate_scalar_3d(volume, dkk, dii, djj):
     # assert that inside == 8
     #return 1 if inside == 8 else 0
     return out
+
+
+def dense_image_warp_3D_scikit(image, flow):
+    batch_size, height, width, depth, channels = (np.shape(image)[0],
+                                                  np.shape(image)[1],
+                                                  np.shape(image)[2],
+                                                  np.shape(image)[3],
+                                                  np.shape(image)[4])
+
+
+    input_sz = 64
+    output_sz = 24
+    gap = int((input_sz - output_sz) / 2)
+    batch_img_sub = np.zeros((batch_size, output_sz, output_sz, output_sz, channels), dtype=image.dtype)
+    batch_img_sub[:, :, :, :, :] = image[:, 0 + gap:0 + gap + output_sz,
+                                   0 + gap:0 + gap + output_sz,
+                                   0 + gap:0 + gap + output_sz, :]
+
+    warped_img = np.zeros(shape=np.shape(batch_img_sub), dtype=image.dtype)
+
+    grid_i, grid_j, grid_k = np.mgrid[:output_sz, :output_sz, :output_sz]
+    coords = np.array([grid_i, grid_j, grid_k]) # (3, 24, 24, 24)
+    batched_coord = np.expand_dims(coords, axis=0)  #add the batch dim on axis 0 # b, 3, 24, 24, 24
+    flow_perm = np.transpose(flow, axes=[0, 4, 1, 2, 3]) # b, 3, i, j, k
+    # subtraction because we are specifying where in the original image each pixel in the new image comes from
+    query_points_on_grid = batched_coord - flow_perm
+
+
+    for b in range(batch_size):
+        volume = image[b, :,:,:, 0]
+        warped_img[b, :,:,:, 0] = warp(volume, query_points_on_grid[b,:,:,:,:], order=3, mode='edge')
+
+
+
+    # def _warp_batch(b):
+    #     volume = image[b, :, :, :, 0]
+    #     warped_batch_image = warp(volume, query_points_on_grid[b, :, :, :, :])
+    #     return warped_batch_image
+    #
+    # returns =  Parallel(n_jobs=batch_size)(delayed(_warp_batch)(b) for b in range(batch_size))
+    #
+    # for b in returns:
+    #     warped_img[b, :, :, :, 0] = returns(b)
+
+    #warped_img[b, :, :, :, 0] = result
+
+    return warped_img
