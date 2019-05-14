@@ -53,16 +53,16 @@ class GANUnetModel64_v2():
         self.df = 64
 
         # Train the discriminator faster than the generator
-        #optimizerD = Adam(0.001, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = Adam(0.01, decay=0.00005) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
         optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
-        self.discriminator = self.build_discriminator()
+        self.discriminator = self.build_discriminator_v2()
         self.discriminator.compile(loss = 'binary_crossentropy',
-                                   optimizer=optimizerG,
+                                   optimizer=optimizerD,
                                    metrics=['accuracy'])
 
         # Build the generator
@@ -74,7 +74,7 @@ class GANUnetModel64_v2():
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
         img_T = Input(shape=self.input_shape_g) # template image T
-        img_R = Input(shape=self.input_shape_d) # reference or transform
+        #img_R = Input(shape=self.input_shape_d) # reference or transform
 
         # By conditioning on T generate a warped transformation function of S
         phi = self.generator([img_S, img_T])
@@ -95,7 +95,7 @@ class GANUnetModel64_v2():
         validity = self.discriminator([warped_S, img_T])
         #valid = self.discriminator([img_R, img_T])
 
-        self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
+        self.combined = Model(inputs=[img_S, img_T], outputs=validity)
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
@@ -120,6 +120,7 @@ class GANUnetModel64_v2():
                         scale=True,
                         padding='valid',
                         use_bias=False,
+                        strides = 1,
                         name=''):
             """
             3D convolutional layer (+ batch normalization) followed by ReLu activation
@@ -128,6 +129,7 @@ class GANUnetModel64_v2():
                            kernel_size=kernel_size,
                            padding=padding,
                            use_bias=use_bias,
+                           strides= strides,
                            name=name + '_conv3d')(input_tensor)
             # if batch_normalization:
             #     layer = BatchNormalization(name=name+'_bn')(layer)
@@ -146,6 +148,7 @@ class GANUnetModel64_v2():
                         scale=True,
                         padding='valid',
                         use_bias=False,
+                        strides = 1,
                         name=''):
             """
             3D deconvolutional layer (+ batch normalization) followed by ReLu activation
@@ -155,6 +158,7 @@ class GANUnetModel64_v2():
                            kernel_size=kernel_size,
                            padding=padding,
                            use_bias=use_bias,
+                           strides = strides,
                            name=name + '_conv3d')(layer)
             # if batch_normalization:
             #     layer = BatchNormalization(name=name+'_bn')(layer)
@@ -177,11 +181,11 @@ class GANUnetModel64_v2():
         # downsampling
         down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1')  # 62x62x62
         down1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='down1_2')          # 60x60x60
-        pool1 = MaxPooling3D(pool_size=(2, 2, 2), name='pool1')(down1)                                  # 30x30x30
+        pool1 = MaxPooling3D(pool_size=(2, 2, 2), strides=2, name='pool1')(down1)                       # 30x30x30
 
         down2 = conv3d(input_tensor=pool1, n_filters=2 * self.gf, padding='valid', name='down2_1')      # 28x28x28
         down2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='down2_2')      # 26x26x26
-        pool2 = MaxPooling3D(pool_size=(2, 2, 2), name='pool2')(down2)                                  # 13x13x13
+        pool2 = MaxPooling3D(pool_size=(2, 2, 2), strides=2, name='pool2')(down2)                       # 13x13x13
 
         center = conv3d(input_tensor=pool2, n_filters=4 * self.gf, padding='valid', name='center1')     # 11x11x11
         center = conv3d(input_tensor=center, n_filters=4 * self.gf, padding='valid', name='center2')    # 9x9x9
@@ -206,7 +210,8 @@ class GANUnetModel64_v2():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
         # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)                 # 24x24x24
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)  # 24x24x24
+        #phi = Conv3D(filters=3, kernel_size=(3, 3, 3), name='phi', padding='same', activation='tanh')(up1)
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -233,15 +238,15 @@ class GANUnetModel64_v2():
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
 
-        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
-        d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 12x12x12
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')                       # 24x24x24
+        d2 = d_layer(d1, self.df*2, name='d2')                                          # 24x24x24
+        pool = MaxPooling3D(pool_size=(2, 2, 2), strides= 2, name='d2_pool')(d2)        # 12x12x12
 
-        d3 = d_layer(pool, self.df*4, name='d3')                                # 12x12x12
-        d4 = d_layer(d3, self.df*8, name='d4')                                  # 12x12x12
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 6x6x6
+        d3 = d_layer(pool, self.df*4, name='d3')                                        # 12x12x12
+        d4 = d_layer(d3, self.df*8, name='d4')                                          # 12x12x12
+        pool = MaxPooling3D(pool_size=(2, 2, 2), strides = 2, name='d4_pool')(d4)       # 6x6x6
 
-        d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
+        d5 = d_layer(pool, self.df*8, name='d5')                                        # 6x6x6
 
         # ToDo: Use FC layer at the end like specified in the paper
         #validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
@@ -320,19 +325,19 @@ class GANUnetModel64_v2():
         gradients_sqr_sum = K.sum(gradients_sqr,
                                   axis=np.arange(1, len(gradients_sqr.shape)))
         #   ... and sqrt
-        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # compute lambda * (1 - ||grad||)^2 still for each single sample
         #gradient_penalty = K.square(1 - gradient_l2_norm)
         # return the mean as loss over all the batch samples
-        return K.mean(gradient_l2_norm) + Lr
-        #return gradients_sqr_sum + Lr
+        #return K.mean(gradient_l2_norm) + Lr
+        return gradients_sqr_sum + Lr
 
 
     def discriminator_loss(self, y_true, y_pred):
         if y_true ==1:
-            Ld = K.log(1-y_pred)
+            Ld = -K.log(K.maximum(y_pred, 1e-15))  #ensure numerical stability avoid log 0
         else: #y_true=0
-            Ld = K.log(y_pred)
+            Ld = -K.log(1-K.minimum(y_pred, 0.99999))  # ensure numerical stability avoid log 0
 
         return Ld
 
@@ -346,8 +351,8 @@ class GANUnetModel64_v2():
         os.makedirs(path+'generated/' , exist_ok=True)
         # Adversarial loss ground truths
         #disc_patch = (1,1,1,1) # discrimniator output
-        #disc_patch = self.output_shape_d_v2
-        disc_patch = self.output_shape_d
+        disc_patch = self.output_shape_d_v2
+        #disc_patch = self.output_shape_d
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)
@@ -427,7 +432,7 @@ class GANUnetModel64_v2():
                 #  Train Generator
                 # ---------------------
                 # Train the generator (to fool the discriminator)
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], validhard)
                 #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
 
                 elapsed_time = datetime.datetime.now() - start_time
@@ -477,7 +482,7 @@ class GANUnetModel64_v2():
 
         idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
-        imgs_T_mask = self.data_loader.mask_template
+        #imgs_T_mask = self.data_loader.mask_template
 
         #imgs_S = imgs_S * imgs_S_mask
         #imgs_T = imgs_T * imgs_T_mask
@@ -551,7 +556,7 @@ if __name__ == '__main__':
     #K.set_session(sess)
 
     gan = GANUnetModel64_v2()
-    gan.train(epochs=200, batch_size=1, sample_interval=200)
+    gan.train(epochs=500, batch_size=1, sample_interval=200)
 
 
 
