@@ -258,7 +258,7 @@ class GANUnetModel40():
         start_time = datetime.datetime.now()
 
         for epoch in range(epochs):
-            for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch()):
+            for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch(dataset_name='fish')):
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
@@ -266,8 +266,8 @@ class GANUnetModel40():
 
                 # deformable transformation
                 transform = self.transformation.predict([batch_img, phi])
-                non_zero_indices = np.where(transform != 0)[0]
-                print(len(non_zero_indices))
+                #non_zero_indices = np.where(transform != 0)[0]
+                #print(len(non_zero_indices))
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
@@ -312,6 +312,8 @@ class GANUnetModel40():
         imgs_T = imgs_T * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
+
+
 
         input_sz = (40, 40, 40)
         step = (15, 15, 15)
