@@ -14,12 +14,13 @@ DEBUG = 1
 
 class DataLoader():
 
-    def __init__(self, batch_sz = 16, dataset_name ='fly', use_hist_equilized_data = False):
+    def __init__(self, batch_sz = 16, dataset_name ='fly', crop_size= (64, 64, 64), use_hist_equilized_data = False):
         """
         :param batch_sz: int - size of the batch
         :param sampletype: string - 'fly' or 'fish'
         """
         self.batch_sz = batch_sz
+        self.crop_sz = crop_size
 
         self.imgs = []
         self.masks = []
@@ -42,8 +43,8 @@ class DataLoader():
 
         self.batch_sz = batch_sz
         self.n_gpus = 1
-        self.crop_sz = (40, 40, 40)  # the image shape is 1227,1996,40, and sometimes 1170, 1996,43
-        self.mask_sz = (40, 40, 40)
+        #self.crop_sz = (self.crop_sz, self.crop_sz, self.crop_sz)  # the image shape is 1227,1996,40, and sometimes 1170, 1996,43
+        self.mask_sz = self.crop_sz #(self.crop_sz, self.crop_sz, self.crop_sz)
 
         imgs = []
         masks = []
@@ -135,8 +136,9 @@ class DataLoader():
     def prepare_fly_data(self, batch_sz, use_hist_equilized_data=False):
         self.batch_sz = batch_sz
         self.n_gpus = 1
-        self.crop_sz = (64, 64, 64)
-        self.mask_sz = (64, 64, 64)
+        #self.crop_sz = (self.crop_sz, self.crop_sz, self.crop_sz)
+        #self.mask_sz = (self.crop_sz, self.crop_sz, self.crop_sz)
+        self.mask_sz = self.crop_sz
 
         imgs = []
         masks = []
@@ -151,22 +153,22 @@ class DataLoader():
         #filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
         if use_hist_equilized_data:
             img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
+                      filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd'#,
+                      #filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
+                      #filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
+                      #filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
+                      #filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
+                      #filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
+                      #filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
+                      #filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
+                      #filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
+                      #filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
                       #filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd', # remove the last 3 for testing
                       #filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
                       #filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
@@ -175,22 +177,22 @@ class DataLoader():
         else:
             filepath_un = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/proc/'
             img_pp = [filepath_un + '20161102_32_C1_Scope_1_C1_down_result.nrrd',
-                      filepath_un + '20161102_32_C3_Scope_4_C1_down_result.nrrd',
-                      filepath_un + '20161102_32_D1_Scope_1_C1_down_result.nrrd',
-                      filepath_un + '20161102_32_D2_Scope_1_C1_down_result.nrrd',
-                      filepath_un + '20161102_32_E1_Scope_1_C1_down_result.nrrd',
-                      filepath_un + '20161102_32_E3_Scope_4_C1_down_result.nrrd',
-                      filepath_un + '20161220_31_I1_Scope_2_C1_down_result.nrrd',
-                      filepath_un + '20161220_31_I2_Scope_6_C1_down_result.nrrd',
-                      filepath_un + '20161220_31_I3_Scope_6_C1_down_result.nrrd',
-                      filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
-                      filepath_un + '20170223_32_E3_Scope_3_C1_down_result.nrrd'
+                      filepath_un + '20161102_32_C3_Scope_4_C1_down_result.nrrd'#,
+                      #filepath_un + '20161102_32_D1_Scope_1_C1_down_result.nrrd',
+                      #filepath_un + '20161102_32_D2_Scope_1_C1_down_result.nrrd',
+                      #filepath_un + '20161102_32_E1_Scope_1_C1_down_result.nrrd',
+                      #filepath_un + '20161102_32_E3_Scope_4_C1_down_result.nrrd',
+                      # filepath_un + '20161220_31_I1_Scope_2_C1_down_result.nrrd',
+                      # filepath_un + '20161220_31_I2_Scope_6_C1_down_result.nrrd',
+                      # filepath_un + '20161220_31_I3_Scope_6_C1_down_result.nrrd',
+                      # filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_E3_Scope_3_C1_down_result.nrrd'
                       # filepath_un+ '20170301_31_B1_Scope_1_C1_down_result.nrrd', # remove the last 3 for testing
                       # filepath_un+ '20170301_31_B3_Scope_1_C1_down_result.nrrd',
                       # filepath_un+ '20170301_31_B5_Scope_1_C1_down_result.nrrd'
@@ -214,7 +216,7 @@ class DataLoader():
                    filepath + '20170223_32_E1_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E2_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E3_Scope_3_C1_down_result_mask.nrrd'
-                   #filepath + '20170301_31_B1_Scope_1_C1_down_result_mask.nrrd',
+                   #filepath + '20170301_31_B1_Scope_1_C1_down_result_mask.nrrd', # remove the last 3 for testing
                    #filepath + '20170301_31_B3_Scope_1_C1_down_result_mask.nrrd',
                    #filepath + '20170301_31_B5_Scope_1_C1_down_result_mask.nrrd'
                    ]
@@ -334,12 +336,12 @@ class DataLoader():
                 is_include = False
                 num_vox = len(cropped_mask[cropped_mask == 1])
 
-                accept_prob = np.random.random()
-                if num_vox > 500 and accept_prob > 0.98:
+                #accept_prob = np.random.random()
+                if num_vox > 500: #and accept_prob > 0.98:
                     is_include = True
 
                 if is_include:
-                    if DEBUG: print('include this batch %d, %d, %d' %(x, y, z))
+                    #if DEBUG: print('include this batch %d, %d, %d' %(x, y, z))
                     batch_img[num_crop,:,:,:,0] = cropped_img
                     batch_mask[num_crop,:,:,:,0] = cropped_mask
 
