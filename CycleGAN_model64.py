@@ -21,7 +21,8 @@ import nrrd
 import os
 
 from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
-from ImageRegistrationGANs.data_loader import DataLoader
+#from ImageRegistrationGANs.data_loader import DataLoader
+from data_loader import DataLoader   #To run on the cluster
 
 __author__ = 'elmalakis'
 
@@ -239,11 +240,26 @@ class CycleGAN_model64():
                 if self.DEBUG:
                     self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
+                    weight_grad_gen = self.get_weight_grad(self.combined, [imgs_A, imgs_B],
+                                                        [valid, valid,
+                                                        imgs_A, imgs_B,
+                                                        imgs_A, imgs_B])
+
+                    weight_grad_disc = self.get_weight_grad(self.d_A, fake_A, fake)
 
                 # If at save interval => save generated image samples
                 if batch_i % sample_interval == 0:
                     self.sample_images(epoch, batch_i)
 
+
+    def get_weight_grad(self, model, inputs, outputs):
+        """ Gets gradient of model for given inputs and outputs for all weights"""
+        grads = model.optimizer.get_gradients(model.total_loss, model.trainable_weights)
+        symb_inputs = (model._feed_inputs + model._feed_targets + model._feed_sample_weights)
+        f = K.function(symb_inputs, grads)
+        x, y, sample_weight = model._standardize_user_data(inputs, outputs)
+        output_grad = f(x + y + sample_weight)
+        return output_grad
 
     def write_log(self, callback, names, logs, batch_no):
         #https://github.com/eriklindernoren/Keras-GAN/issues/52
