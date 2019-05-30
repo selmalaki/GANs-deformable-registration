@@ -17,7 +17,9 @@ import datetime
 import nrrd
 import os
 
-from ImageRegistrationGANs.data_loader import DataLoader
+
+#from ImageRegistrationGANs.data_loader import DataLoader
+from data_loader import DataLoader   #To run on the cluster
 
 __author__ = 'elmalakis'
 
@@ -37,7 +39,7 @@ class GAN_pix2pix():
         self.img_shape = (self.img_rows, self.img_cols, self.img_vols, self.channels )
 
 
-        self.batch_sz = 1 # for testing locally to avoid memory allocation
+        self.batch_sz = 4 # for testing locally to avoid memory allocation
         self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly', crop_size=(self.img_rows, self.img_cols, self.img_vols))
 
 
@@ -123,14 +125,14 @@ class GAN_pix2pix():
         d7 = conv2d(d6, self.gf*8)           #1x1x1
 
         # Upsampling
-        u1 = deconv2d(d7, d6, self.gf*8)
-        u2 = deconv2d(d6, d5, self.gf*8)
-        u3 = deconv2d(u2, d4, self.gf*8)
-        u4 = deconv2d(u3, d3, self.gf*4)
-        u5 = deconv2d(u4, d2, self.gf*2)
-        u6 = deconv2d(u5, d1, self.gf)
+        u1 = deconv2d(d7, d6, self.gf*8)     #2x2x2
+        u2 = deconv2d(u1, d5, self.gf*8)     #4x4x4
+        u3 = deconv2d(u2, d4, self.gf*8)     #8x8x8
+        u4 = deconv2d(u3, d3, self.gf*4)     #16x16x16
+        u5 = deconv2d(u4, d2, self.gf*2)     #32x32x32
+        u6 = deconv2d(u5, d1, self.gf)       #64x64x64
 
-        u7 = UpSampling3D(size=2)(u6)
+        u7 = UpSampling3D(size=2)(u6)        #128x128x128 #the original architecture from the paper is a bit different
         output_img = Conv3D(self.channels, kernel_size=4, strides=1, padding='same', activation='tanh')(u7)
 
         return Model(d0, output_img)
@@ -165,7 +167,7 @@ class GAN_pix2pix():
     """
     Training
     """
-    def train(self, epochs, batch_size=1, sample_interval=50):
+    def train(self, epochs, batch_size=4, sample_interval=50):
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         os.makedirs(path+'generated/' , exist_ok=True)
@@ -230,12 +232,12 @@ class GAN_pix2pix():
         os.makedirs(path+'generated/' , exist_ok=True)
 
         idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
-        imgs_T = self.data_loader.img_template
+        # imgs_T = self.data_loader.img_template
 
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
 
-        input_sz = (64, 64, 64)
+        input_sz = (128, 128, 128)
         step = (32, 32, 32)
 
         gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
@@ -247,21 +249,21 @@ class GAN_pix2pix():
             for col in range(0, imgs_S.shape[1] - input_sz[1], step[1]):
                 for vol in range(0, imgs_S.shape[2] - input_sz[2], step[2]):
 
-                    # patch_sub_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_S.dtype)
+                    patch_sub_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_S.dtype)
                     # patch_templ_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_T.dtype)
-                    #
-                    # patch_sub_img[0, :, :, :, 0] = imgs_S[row:row + input_sz[0],
-                    #                                     col:col + input_sz[1],
-                    #                                     vol:vol + input_sz[2]]
+
+                    patch_sub_img[0, :, :, :, 0] = imgs_S[row:row + input_sz[0],
+                                                         col:col + input_sz[1],
+                                                         vol:vol + input_sz[2]]
                     # patch_templ_img[0, :, :, :, 0] = imgs_T[row:row + input_sz[0],
-                    #                                  col:col + input_sz[1],
-                    #                                  vol:vol + input_sz[2]]
+                    #                                   col:col + input_sz[1],
+                    #                                   vol:vol + input_sz[2]]
 
-                    patch_predict_warped = self.generator.predict(imgs_S)
+                    patch_predict_warped = self.generator.predict(patch_sub_img)
 
-                    predict_img[row + gap[0]:row + gap[0] + step[0],
-                                col + gap[1]:col + gap[1] + step[1],
-                                vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
+                    predict_img[row :row + input_sz[0],
+                                col :col + input_sz[1],
+                                vol :vol + input_sz[2]] = patch_predict_warped[0, :, :, :, 0]
 
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
@@ -298,7 +300,7 @@ if __name__ == '__main__':
     #K.set_session(sess)
 
     gan = GAN_pix2pix()
-    gan.train(epochs=20000, batch_size=1, sample_interval=200)
+    gan.train(epochs=20000, batch_size=4, sample_interval=200)
 
 
 
