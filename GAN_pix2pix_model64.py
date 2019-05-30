@@ -229,7 +229,7 @@ class GAN_pix2pix():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
 
         idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
         # imgs_T = self.data_loader.img_template
@@ -268,26 +268,25 @@ class GAN_pix2pix():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_pix2pix/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
 
         file_name = 'gan_network'
-
         # save the whole network
-        gan.combined.save(file_name + '.whole.h5', overwrite=True)
+        gan.combined.save(path+'generated_pix2pix/'+file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_arch.json', 'w') as json_file:
+        with open(path+'generated_pix2pix/'+file_name + '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_pix2pix/'+file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
         # save the encoder network
-        gan.generator.save(file_name + '.gen.h5', overwrite=True)
+        gan.generator.save(path+'generated_pix2pix/'+file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_gen_arch.json', 'w') as json_file:
+        with open(path+'generated_pix2pix/'+file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_gen_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_pix2pix/'+file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
 
 
