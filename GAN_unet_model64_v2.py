@@ -47,7 +47,7 @@ class GANUnetModel64_v2():
         self.output_shape_d = (6, 6, 6) + (self.channels,)
         self.output_shape_d_v2 = (3, 3, 3) + (self.channels,)
 
-        self.batch_sz = 2# for testing locally to avoid memory allocation
+        self.batch_sz = 2 # for testing locally to avoid memory allocation
         self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
 
         # Number of filters in the first layer of G and D
@@ -63,12 +63,14 @@ class GANUnetModel64_v2():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator_v2()
-
+        self.discriminator.compile(loss = 'binary_crossentropy',
+                                   optimizer=optimizerG,
+                                   metrics=['accuracy'])
         # Build the generator
         self.generator = self.build_generator()
 
         # Build the deformable transformation layer
-        self.transformation = self.build_transformation()
+        #self.transformation = self.build_transformation()
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
@@ -76,10 +78,10 @@ class GANUnetModel64_v2():
         #img_R = Input(shape=self.input_shape_d) # reference or transform
 
         # By conditioning on T generate a warped transformation function of S
-        phi = self.generator([img_S, img_T])
+        phi, warped_S = self.generator([img_S, img_T])
 
         # Transform S
-        warped_S = self.transformation([img_S, phi])
+        #warped_S = self.transformation([img_S, phi])
 
         # Use Python partial to provide loss function with additional deformable field argument
         partial_gp_loss = partial(self.gradient_penalty_loss, phi=phi)
@@ -87,8 +89,6 @@ class GANUnetModel64_v2():
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
-        self.transformation.trainable = False
-        self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
         validity = self.discriminator([warped_S, img_T])
@@ -96,17 +96,11 @@ class GANUnetModel64_v2():
 
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
+
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
-        #                      loss_weights=[1, 100],
+        #                      loss_weights=[1, 10],
         #                      optimizer=optimizerG)
-
-
-        # Move the compilation of discriminator here
-        self.discriminator.trainable = True
-        self.discriminator.compile(loss = 'binary_crossentropy',
-                                   optimizer=optimizerG,
-                                   metrics=['accuracy'])
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
@@ -217,7 +211,11 @@ class GANUnetModel64_v2():
 
         phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)  # 24x24x24
 
-        model = Model([img_S, img_T], outputs=phi, name='generator_model')
+        # Add the transformation here
+        img_S_cropped = Cropping3D(cropping=20)(img_S)  # 24x24x24
+        warped_S = Lambda(dense_image_warp_3D)([img_S_cropped, phi])  #24x24x24
+
+        model = Model([img_S, img_T], outputs=[phi, warped_S], name='generator_model')
 
         return model
 
@@ -392,14 +390,14 @@ class GANUnetModel64_v2():
                 #nrrd.write(path + "traindata/i_%d_%d" % (epoch, batch_i), batch_img[0,:,:,:,0])
                 #nrrd.write(path + "traindata/t_%d_%d" % (epoch, batch_i), batch_img_template[0, :, :, :, 0])
 
-                phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
+                phi, transform = self.generator.predict([batch_img, batch_img_template]) #24x24x24
                 assert not np.any(np.isnan(phi))
 
                 # deformable transformation
-                transform = self.transformation.predict([batch_img, phi])     #24x24x24
+                #transform = self.transformation.predict([batch_img, phi])     #24x24x24
                 #transform = dense_image_warp_3D_dipy(image=batch_img, flow=phi)
                 #transform = dense_image_warp_3D_scikit(image=batch_img, flow=phi)
-                assert not np.any(np.isnan(transform))
+                #assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
@@ -465,8 +463,11 @@ class GANUnetModel64_v2():
                 if self.DEBUG:
                     self.write_log(self.tensorboard, ['g_loss'], [g_loss], batch_i)
                     self.write_log(self.tensorboard, ['d_loss'], [d_loss[0]], batch_i)
-                    #weight_grad_gen = self.get_weight_grad(self.combined, [batch_img, batch_img_template], validhard )
-                    #weight_grad_disc = self.get_weight_grad(self.discriminator, [transform, batch_img_template], fakehard)
+                    weight_grad_gen = self.get_weight_grad(self.combined, [batch_img, batch_img_template], validhard )
+                    weight_grad_disc = self.get_weight_grad(self.discriminator, [transform, batch_img_template], fakehard)
+
+                    #grad_gen = self.get_layer_output_grad(self.combined, [batch_img, batch_img_template], validhard)
+                    #grad_disc = self.get_layer_output_grad(self.discriminator, [transform, batch_img_template], fakehard)
 
                     #self.tensorboard.on_epoch_end(batch_i, self.named_logs(self.discriminator, [d_loss[0]]))
                     #self.tensorboard.on_epoch_end(batch_i, self.named_logs(self.combined, [g_loss]))
@@ -554,7 +555,7 @@ class GANUnetModel64_v2():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated/' , exist_ok=True)
+        os.makedirs(path+'generated_unet/' , exist_ok=True)
 
         idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
@@ -586,9 +587,9 @@ class GANUnetModel64_v2():
                                                      col:col + input_sz[1],
                                                      vol:vol + input_sz[2]]
 
-                    patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
+                    patch_predict_phi, patch_predict_warped = self.generator.predict([patch_sub_img, patch_templ_img])
 
-                    patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
+                    #patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
                     #patch_predict_warped = dense_image_warp_3D_dipy(patch_sub_img, patch_predict_phi)
                     #patch_predict_warped = dense_image_warp_3D_scikit(image=patch_sub_img, flow=patch_predict_phi)
 
@@ -603,32 +604,28 @@ class GANUnetModel64_v2():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_unet/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
         #nrrd.write(path+"generated/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
-        self.data_loader._write_nifti(path+"generated/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
+        self.data_loader._write_nifti(path+"generated_unet/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'
         # save the whole network
-        gan.combined.save(file_name + '.whole.h5', overwrite=True)
+        gan.combined.save(path+'generated_unet/' + file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_arch.json', 'w') as json_file:
+        with open(path+'generated_unet/' + file_name + '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_unet/' + file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
         # save the generator network
-        gan.generator.save(file_name + '.gen.h5', overwrite=True)
+        gan.generator.save(path+'generated_unet/' + file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_gen_arch.json', 'w') as json_file:
+        with open(path+'generated_unet/'+file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_gen_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_unet/' + file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
-
-
-
-
 
 
 
@@ -637,7 +634,7 @@ class TestGAN():
     def __init__(self, data_loader, generator, transformation):
 
         self.path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(self.path + 'generated/', exist_ok=True)
+        os.makedirs(self.path + 'generated_unet/', exist_ok=True)
         self.data_loader = data_loader
         self.generator = generator
         self.transformation = transformation
