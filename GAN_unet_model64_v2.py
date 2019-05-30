@@ -47,7 +47,7 @@ class GANUnetModel64_v2():
         self.output_shape_d = (6, 6, 6) + (self.channels,)
         self.output_shape_d_v2 = (3, 3, 3) + (self.channels,)
 
-        self.batch_sz = 1# for testing locally to avoid memory allocation
+        self.batch_sz = 2# for testing locally to avoid memory allocation
         self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
 
         # Number of filters in the first layer of G and D
@@ -215,9 +215,7 @@ class GANUnetModel64_v2():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 26x26x26
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
-        # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
-        #phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)  # 24x24x24
-        phi = Conv3D(filters=3, kernel_size=(3, 3, 3),strides=1,  name='phi', padding='same', activation='tanh')(up1)
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)  # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -356,7 +354,7 @@ class GANUnetModel64_v2():
     def train(self, epochs, batch_size=1, sample_interval=50):
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated/' , exist_ok=True)
+        os.makedirs(path+'generated_unet/' , exist_ok=True)
         # Adversarial loss ground truths
         #disc_patch = (1,1,1,1) # discrimniator output
         disc_patch = self.output_shape_d_v2
@@ -388,6 +386,11 @@ class GANUnetModel64_v2():
                 # ---------------------
                 assert not np.any(np.isnan(batch_img))
                 assert not np.any(np.isnan(batch_img_template))
+                #Test
+                #path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
+                #os.makedirs(path + 'traindata/', exist_ok=True)
+                #nrrd.write(path + "traindata/i_%d_%d" % (epoch, batch_i), batch_img[0,:,:,:,0])
+                #nrrd.write(path + "traindata/t_%d_%d" % (epoch, batch_i), batch_img_template[0, :, :, :, 0])
 
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
                 assert not np.any(np.isnan(phi))
@@ -401,7 +404,7 @@ class GANUnetModel64_v2():
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
-
+                #nrrd.write(path + "traindata/r_%d_%d" % (epoch, batch_i), batch_ref[0, :, :, :, 0])
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
                 batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
@@ -561,7 +564,7 @@ class GANUnetModel64_v2():
         #imgs_T = imgs_T * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
-        #predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
+        predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
         input_sz = (64, 64, 64)
         step = (24, 24, 24)
@@ -593,15 +596,16 @@ class GANUnetModel64_v2():
                                 col + gap[1]:col + gap[1] + step[1],
                                 vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
 
-                    #predict_phi[row + gap[0]:row + gap[0] + step[0],
-                    #            col + gap[1]:col + gap[1] + step[1],
-                    #            vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
+                    predict_phi[row + gap[0]:row + gap[0] + step[0],
+                               col + gap[1]:col + gap[1] + step[1],
+                               vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
 
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
         nrrd.write(path+"generated/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
         #nrrd.write(path+"generated/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
+        self.data_loader._write_nifti(path+"generated/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'
         # save the whole network
