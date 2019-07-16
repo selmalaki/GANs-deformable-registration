@@ -5,8 +5,9 @@ import keras.backend as K
 import tensorflow as tf
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
-from keras.layers import Input, Dense, Reshape, Flatten, Dropout, Concatenate, concatenate
-from keras.layers import Lambda
+from keras.layers import Input, Concatenate, concatenate, Reshape
+#from keras.layers import Lambda
+from keras.layers.core import Flatten, Dense, Lambda
 
 from keras.layers.advanced_activations import LeakyReLU, ReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
@@ -24,6 +25,11 @@ import os
 from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
 from ImageRegistrationGANs.data_loader import DataLoader
 
+
+#from data_loader import DataLoader   #To run on the cluster'
+#from helpers import dense_image_warp_3D, numerical_gradient_3D #To run on the cluster'
+
+
 __author__ = 'elmalakis'
 
 
@@ -32,6 +38,7 @@ class GANUnetModel64():
     def __init__(self):
 
         K.set_image_data_format('channels_last')  # set format
+        K.set_image_dim_ordering('tf')
         self.DEBUG = 1
 
         self.crop_size_g = (64, 64, 64)
@@ -45,14 +52,13 @@ class GANUnetModel64():
         self.output_shape_d_v2 = (2, 2, 2) + (self.channels,)
 
         self.batch_sz = 4 # for testing locally to avoid memory allocation
-        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
 
         # Number of filters in the first layer of G and D
         self.gf = 64
         self.df = 64
 
         # Train the discriminator faster than the generator
-        #optimizerD = Adam(0.001, 0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = Adam(0.001, decay=0.00005) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
@@ -60,15 +66,18 @@ class GANUnetModel64():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator_v2()
+        self.discriminator.summary()
         self.discriminator.compile(loss='binary_crossentropy',
-            optimizer=optimizerG,
-            metrics=['accuracy'])
+                                    optimizer=optimizerD,
+                                    metrics=['accuracy'])
 
         # Build the generator
         self.generator = self.build_generator()
-
-        # Build the deformable transformation layer
+        self.generator.summary()
+       # Build the deformable transformation layer
         self.transformation = self.build_transformation()
+        self.transformation.summary()
+        #self.transformation.compile(optimizer=optimizerG, loss='binary_crossentropy')
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
@@ -87,8 +96,8 @@ class GANUnetModel64():
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
-        self.transformation.trainable = False
-        self.generator.trainable = True
+        #self.transformation.trainable = False
+        #self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
         validity = self.discriminator([warped_S, img_T])
@@ -96,17 +105,25 @@ class GANUnetModel64():
 
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
+        self.combined.summary()
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
+        #self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
+        #self.discriminator.trainable = True
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
         #                      loss_weights=[1, 100],
         #                      optimizer=optimizerG)
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v1_2/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
+        self.data_loader = DataLoader(batch_sz=self.batch_sz,
+                                      dataset_name='fly',
+                                      min_max=False,
+                                      restricted_mask=False,
+                                      use_hist_equilized_data=True)
 
     """
     Generator Network
@@ -132,10 +149,10 @@ class GANUnetModel64():
             # if batch_normalization:
             #     layer = BatchNormalization(name=name+'_bn')(layer)
             #layer = Activation('relu', name=name+'_actrelu')(layer)
-            layer = LeakyReLU(alpha=0.2, name=name+'_actleakyrelu')(layer)
             # Add BN after activation
             if batch_normalization:
                 layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
+            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
             return layer
 
 
@@ -159,11 +176,11 @@ class GANUnetModel64():
             # if batch_normalization:
             #     layer = BatchNormalization(name=name+'_bn')(layer)
             #layer = Activation('relu', name=name+'_actrelu')(layer)
-            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
-            # BN after activation
+
+            # BN before activation
             if batch_normalization:
                 layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
-
+            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
             return layer
 
 
@@ -205,7 +222,6 @@ class GANUnetModel64():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 26x26x26
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
-        # ToDo: check if the activation function 'sigmoid' is the right one or leave it to be linear; originally sigmoid
         phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)                 # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
@@ -220,9 +236,9 @@ class GANUnetModel64():
         def d_layer(layer_input, filters, f_size=3, bn=True, scale=True,  name=''): #change the bn to False
             """Discriminator layer"""
             d = Conv3D(filters, kernel_size=f_size, strides=1, padding='same', name=name+'_conv3d')(layer_input)
-            d = LeakyReLU(alpha=0.2, name=name+'_leakyrelu')(d)
             if bn:
                 d = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(d)
+            d = LeakyReLU(alpha=0.2, name=name + '_leakyrelu')(d)
             return d
 
         img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
@@ -244,11 +260,16 @@ class GANUnetModel64():
         d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
 
         # ToDo: Use FC layer at the end like specified in the paper
-        #validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
+        #d6 = Conv3D(1, kernel_size=4, strides=1, padding='same', name='validity')(d5)  # 6x6x6
+
+        #validity = Flatten(data_format='channels_last')(d6)
+        #x = Reshape((6*6*6*512,))(d5) # hack to avoid flatten bug
+        #validity = Dense(1, activation='sigmoid')(x)
 
         # Use FC layer
         #d6 = Flatten(input_shape=(self.batch_sz,) + (6,6,6,512))(d5)
-        validity = Dense(1, activation='sigmoid')(d5)
+        #validity = Dense(1, activation='sigmoid')(d5)
 
         return Model([img_A, img_T], validity, name='discriminator_model')
 
@@ -279,6 +300,9 @@ class GANUnetModel64():
         d3 = d_layer(d2, self.df*4, name='d3')
         d4 = d_layer(d3, self.df*8, name='d4')
 
+        #d5 = Flatten()(d4)
+        #validity = Dense(1, activation='sigmoid')(d5)
+
         validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='disc_sig')(d4) # 2x2x2
 
         return Model([img_A, img_T], validity, name='discriminator_model')
@@ -293,7 +317,7 @@ class GANUnetModel64():
         phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 24x24x24
 
         img_S_cropped = Cropping3D(cropping=20)(img_S)  # 24x24x24
-        warped_S = Lambda(dense_image_warp_3D)([img_S_cropped, phi])
+        warped_S = Lambda(dense_image_warp_3D, output_shape=(24,24,24,1))([img_S_cropped, phi])
 
         return Model([img_S, phi], warped_S)
 
@@ -311,21 +335,22 @@ class GANUnetModel64():
         #else:
         #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
 
+        #return lr
+        #
         # compute the numerical gradient of phi
         gradients = numerical_gradient_3D(phi)
-        #if self.DEBUG: gradients = K.print_tensor(gradients, message='gradients are:')
-
+        # #if self.DEBUG: gradients = K.print_tensor(gradients, message='gradients are:')
+        #
         # compute the euclidean norm by squaring ...
         gradients_sqr = K.square(gradients)
         #   ... summing over the rows ...
-        gradients_sqr_sum = K.sum(gradients_sqr,
-                                  axis=np.arange(1, len(gradients_sqr.shape)))
-        #   ... and sqrt
-        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
-        # compute lambda * (1 - ||grad||)^2 still for each single sample
-        #gradient_penalty = K.square(1 - gradient_l2_norm)
-        # return the mean as loss over all the batch samples
-        #return K.mean(gradient_l2_norm) + lr
+        gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
+        # #   ... and sqrt
+        # #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        # # compute lambda * (1 - ||grad||)^2 still for each single sample
+        # #gradient_penalty = K.square(1 - gradient_l2_norm)
+        # # return the mean as loss over all the batch samples
+        # #return K.mean(gradient_l2_norm) + lr
         return gradients_sqr_sum + lr
 
 
@@ -335,7 +360,6 @@ class GANUnetModel64():
     def train(self, epochs, batch_size=1, sample_interval=50):
 
         # Adversarial loss ground truths
-        #disc_patch = (1,1,1,1) # discrimniator output
         disc_patch = self.output_shape_d_v2
         input_sz = 64
         output_sz = 24
@@ -344,7 +368,6 @@ class GANUnetModel64():
         # hard labels
         validhard = np.ones((self.batch_sz,) + disc_patch)
         fakehard = np.zeros((self.batch_sz,) + disc_patch)
-
         # hard labels with only one output
         #validhard = np.ones((self.batch_sz, 1))
         #fakehard = np.zeros((self.batch_sz, 1))
@@ -352,8 +375,8 @@ class GANUnetModel64():
         # soft labels only smooth the labels of postive samples
         # https://arxiv.org/abs/1701.00160
         # https://github.com/soumith/ganhacks/issues/41
-        smooth = 0.1 # validhard -smooth
-        validsoft =  0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
+        #smooth = 0.1 # validhard -smooth
+        #validsoft =  0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
         #fakesoft =  0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
 
         start_time = datetime.datetime.now()
@@ -362,15 +385,15 @@ class GANUnetModel64():
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
-                assert not np.any(np.isnan(batch_img))
-                assert not np.any(np.isnan(batch_img_template))
+                #assert not np.any(np.isnan(batch_img))
+                #assert not np.any(np.isnan(batch_img_template))
 
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
-                assert not np.any(np.isnan(phi))
+                #assert not np.any(np.isnan(phi))
 
                 # deformable transformation
                 transform = self.transformation.predict([batch_img, phi])     #24x24x24
-                assert not np.any(np.isnan(transform))
+                #assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
@@ -390,19 +413,20 @@ class GANUnetModel64():
                                                                       0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz, :]
 
-                assert not np.any(np.isnan(batch_img_sub))
-                assert not np.any(np.isnan(batch_ref_sub))
-                assert not np.any(np.isnan(batch_temp_sub))
+                #assert not np.any(np.isnan(batch_img_sub))
+                #assert not np.any(np.isnan(batch_ref_sub))
+                #assert not np.any(np.isnan(batch_temp_sub))
 
                 # Train the discriminator (R -> T is valid, S -> T is fake)
                 # Noisy and soft labels
+                #self.discriminator.trainable = True
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validsoft)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
                     d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
-                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validsoft)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
@@ -410,16 +434,10 @@ class GANUnetModel64():
                 #  Train Generator
                 # ---------------------
                 # Train the generator (to fool the discriminator)
-                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], validhard)
+                #self.discriminator.trainable = False
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template], validhard)
-                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template, batch_ref_sub], [validhard, batch_temp_sub])
 
                 elapsed_time = datetime.datetime.now() - start_time
-                # print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] [comparing loss: %f] time: %s" % (epoch, epochs,
-                #                                                         batch_i, self.data_loader.n_batches,
-                #                                                         d_loss[0], 100*d_loss[1],
-                #                                                         g_loss[0], g_loss[1],
-                #                                                         elapsed_time))
 
                 print(
                     "[Epoch %d/%d] [Batch %d/%d] [D loss average: %f, acc average: %3d%%, D loss fake:%f, acc: %3d%%, D loss real: %f, acc: %3d%%] [G loss: %f]  time: %s"
@@ -437,7 +455,7 @@ class GANUnetModel64():
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0:
+                if batch_i % sample_interval == 0 and epoch != 0:
                     self.sample_images(epoch, batch_i)
 
                 # If at save interval => save generated image samples
@@ -458,16 +476,17 @@ class GANUnetModel64():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated/' , exist_ok=True)
+        os.makedirs(path+'generated_v1_2/' , exist_ok=True)
 
-        idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
+        idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
-        imgs_T_mask = self.data_loader.mask_template
 
-        #imgs_S = imgs_S * imgs_S_mask
-        #imgs_T = imgs_T * imgs_T_mask
+        # Mask the image with the template mask # already done in the preparing phase
+        # imgs_T_mask = self.data_loader.mask_template
+        # imgs_S = imgs_S * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
+        #predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
         input_sz = (64, 64, 64)
         step = (24, 24, 24)
@@ -493,43 +512,49 @@ class GANUnetModel64():
                     predict_img[row + gap[0]:row + gap[0] + step[0],
                                 col + gap[1]:col + gap[1] + step[1],
                                 vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
+                    # predict_phi[row + gap[0]:row + gap[0] + step[0],
+                    #            col + gap[1]:col + gap[1] + step[1],
+                    #            vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
+
                     # predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_v1_2/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        # self.data_loader._write_nifti(path+"generated_v1_2/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'
-
         # save the whole network
-        gan.combined.save(file_name + '.whole.h5', overwrite=True)
+        gan.combined.save(path+ 'generated_v1_2/'+ file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_arch.json', 'w') as json_file:
+        with open(path+ 'generated_v1_2/'+file_name + '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+ 'generated_v1_2/'+file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
         # save the generator network
-        gan.generator.save(file_name + '.gen.h5', overwrite=True)
+        gan.generator.save(path+ 'generated_v1_2/'+file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(file_name + '_gen_arch.json', 'w') as json_file:
+        with open(path+ 'generated_v1_2/'+file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(file_name + '_gen_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+ 'generated_v1_2/'+file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
 
 
 if __name__ == '__main__':
     # Use GPU
     K.tensorflow_backend._get_available_gpus()
+    K.image_dim_ordering()
+    K.set_image_dim_ordering('tf')
     # launch tf debugger
     #sess = K.get_session()
     #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     #K.set_session(sess)
 
     gan = GANUnetModel64()
-    gan.train(epochs=200, batch_size=1, sample_interval=200)
+    gan.train(epochs=20000, batch_size=4, sample_interval=200)
 
 
 
