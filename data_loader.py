@@ -14,7 +14,7 @@ DEBUG = 1
 
 class DataLoader():
 
-    def __init__(self, batch_sz = 16, dataset_name ='fly', crop_size= (64, 64, 64), use_hist_equilized_data = False):
+    def __init__(self, batch_sz = 16, dataset_name ='fly', crop_size= (64, 64, 64), use_hist_equilized_data = False, min_max = False, restricted_mask=False):
         """
         :param batch_sz: int - size of the batch
         :param sampletype: string - 'fly' or 'fish'
@@ -31,9 +31,11 @@ class DataLoader():
         self.masks_test = []
 
         if dataset_name is 'fly':
-            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz, use_hist_equilized_data)
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fly_data(batch_sz, use_hist_equilized_data, min_max, restricted_mask)
         elif dataset_name is 'fish':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
+        elif dataset_name is 'toy':
+            self.imgs, self.img_template, self.n_batches = self.prepare_toy_data(batch_sz)
         else:
             raise ValueError('Data of type %s is not available' % (dataset_name))
 
@@ -133,7 +135,7 @@ class DataLoader():
         return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
 
 
-    def prepare_fly_data(self, batch_sz, use_hist_equilized_data=False):
+    def prepare_fly_data(self, batch_sz, use_hist_equilized_data=False, min_max=False, restricted_mask=False):
         self.batch_sz = batch_sz
         self.n_gpus = 1
         #self.crop_sz = (self.crop_sz, self.crop_sz, self.crop_sz)
@@ -147,31 +149,32 @@ class DataLoader():
         mask_template = None
 
         imgs_test = []
+
         masks_test = []
 
         filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed_convexhull/'
         #filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/preprocessed/'
         if use_hist_equilized_data:
-            img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_C3_Scope_4_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_D1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_D2_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_E1_Scope_1_C1_down_result_normalized.nrrd',
-                      filepath + '20161102_32_E3_Scope_4_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I1_Scope_2_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I2_Scope_6_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_31_I3_Scope_6_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_32_C1_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20161220_32_C3_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A2_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A3_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_A6_Scope_2_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E1_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E2_Scope_3_C1_down_result_normalized.nrrd',
-                      filepath + '20170223_32_E3_Scope_3_C1_down_result_normalized.nrrd'
-                      #filepath + '20170301_31_B1_Scope_1_C1_down_result_normalized.nrrd', # remove the last 3 for testing
-                      #filepath + '20170301_31_B3_Scope_1_C1_down_result_normalized.nrrd',
-                      #filepath + '20170301_31_B5_Scope_1_C1_down_result_normalized.nrrd'
+            img_pp_normalized = [filepath + '20161102_32_C1_Scope_1_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161102_32_C3_Scope_4_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161102_32_D1_Scope_1_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161102_32_D2_Scope_1_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161102_32_E1_Scope_1_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161102_32_E3_Scope_4_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161220_31_I1_Scope_2_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161220_31_I2_Scope_6_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161220_31_I3_Scope_6_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161220_32_C1_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20161220_32_C3_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20170223_32_A2_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                     # filepath + '20170223_32_A3_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20170223_32_A6_Scope_2_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20170223_32_E1_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20170223_32_E2_Scope_3_C1_down_result_histogram_normalized.nrrd',
+                      filepath + '20170223_32_E3_Scope_3_C1_down_result_histogram_normalized.nrrd'
+                      #filepath + '20170301_31_B1_Scope_1_C1_down_result_histogram_normalized.nrrd', # remove the last 3 for testing
+                      #filepath + '20170301_31_B3_Scope_1_C1_down_result_histogram_normalized.nrrd',
+                      #filepath + '20170301_31_B5_Scope_1_C1_down_result_histogram_normalized.nrrd'
                       ]
 
         else:
@@ -211,7 +214,7 @@ class DataLoader():
                    filepath + '20161220_32_C1_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20161220_32_C3_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_A2_Scope_3_C1_down_result_mask.nrrd',
-                   filepath + '20170223_32_A3_Scope_3_C1_down_result_mask.nrrd',
+                   #filepath + '20170223_32_A3_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_A6_Scope_2_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E1_Scope_3_C1_down_result_mask.nrrd',
                    filepath + '20170223_32_E2_Scope_3_C1_down_result_mask.nrrd',
@@ -224,43 +227,91 @@ class DataLoader():
 
 
         if use_hist_equilized_data:
+            # template
+            #img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_histogram_normalized.nrrd')
+            #mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask.nrrd')
+            #if restricted_mask:
+            #    mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask_restricted.nrrd')
+
+            # For testing use template from the actual dataset (20170223_32_A3_Scope_3_C1_down_result)
+            img_template, templ_header = nrrd.read(filepath + '20170223_32_A3_Scope_3_C1_down_result_histogram_normalized.nrrd')
+            mask_template, templ_header = nrrd.read(filepath + '20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
+
+
+            img_template = np.float32(img_template)
+            mask_template = np.float32(mask_template)
+
+            # Apply the template mask before the normalization
+            img_template = img_template * mask_template
+            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
+            if min_max:
+                img_template = (2 * (img_template - np.min(img_template)) / (np.max(img_template) - np.min(img_template))) - 1
+
             print('----- loading histogram equalized data files -----')
             for i in range(len(img_pp_normalized)):
                 # images normalize
                 curr_img, img_header = nrrd.read(img_pp_normalized[i])
                 curr_img = np.float32(curr_img)
-                #curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img) #already normalized
-                # masks 1: interesting value, 0: not interesting value
-                curr_mask, mask_header = nrrd.read(mask_pp[i])
-                curr_mask = np.float32(curr_mask)
-                masks.append(curr_mask)
-                imgs.append(curr_img)
 
-            # template
-            img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_normalized.nrrd')
-            img_template = np.float32(img_template)
-            #img_template = (img_template - np.mean(img_template)) / np.std(img_template) #already normalized
-            mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask.nrrd')
+                # Apply the template mask before standardization
+                curr_img  = curr_img * mask_template
+                mask = 1-mask_template
+                mask = np.uint8(mask)
+                img_masked = np.ma.array(curr_img, mask=mask)
+                curr_img = (curr_img - img_masked.mean())/img_masked.std()
+
+                #curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+
+                # image normalization
+                if min_max:
+                    #curr_img = (2* (curr_img - np.min(curr_img))/(np.max(curr_img)-np.min(curr_img))) -1
+                    curr_img = (2 * (curr_img - np.min(img_masked)) / (np.max(img_masked) - np.min(img_masked))) - 1
+
+
+                # Just use the template mask
+                # masks 1: interesting value, 0: not interesting value
+                #curr_mask, mask_header = nrrd.read(mask_pp[i])
+                #curr_mask = np.float32(curr_mask)
+                #masks.append(curr_mask)
+                imgs.append(curr_img)
 
         else:
-            print('----- loading normal data files -----')
-            for i in range(len(img_pp)):
-                # images normalize
-                curr_img, img_header = nrrd.read(img_pp[i])
-                curr_img = np.float32(curr_img)
-                curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
-                # masks 1: interesting value, 0: not interesting value
-                curr_mask, mask_header = nrrd.read(mask_pp[i])
-                curr_mask = np.float32(curr_mask)
-                masks.append(curr_mask)
-                imgs.append(curr_img)
-
             # template
             filepath_t = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
             img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
-            img_template = np.float32(img_template)
-            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
             mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
+            if restricted_mask:
+                mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask_restricted.nrrd')
+
+            mask_template = np.float32(mask_template)
+            img_template = np.float32(img_template)
+            # Apply the template mask before the normalization
+            img_template = img_template * mask_template
+
+            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
+            if min_max: # Scale the image from 0 to 1
+                img_template = (2 * (img_template - np.min(img_template)) / (np.max(img_template) - np.min(img_template))) - 1
+
+
+            print('----- loading normal data files -----')
+            for i in range(len(img_pp)):
+                # images standardization
+                curr_img, img_header = nrrd.read(img_pp[i])
+                curr_img = np.float32(curr_img)
+
+                # Apply the template mask before the standardization
+                curr_img  = curr_img * mask_template
+
+                curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+                # image normalization
+                if min_max:
+                    curr_img = (2* (curr_img - np.min(curr_img))/(np.max(curr_img)-np.min(curr_img))) -1
+                # masks 1: interesting value, 0: not interesting value
+                curr_mask, mask_header = nrrd.read(mask_pp[i])
+                curr_mask = np.float32(curr_mask)
+                masks.append(curr_mask)
+                imgs.append(curr_img)
+
 
 
         # TODO: save test images
@@ -276,6 +327,21 @@ class DataLoader():
         n_batches = int((len(imgs) * img_template.shape[0] / self.crop_sz[0]) / self.batch_sz)
 
         return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
+
+
+    def prepare_toy_data(self, batch_sz):
+        imgs = []
+        filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/ToyExample/WarpedSpheres/'
+        for i in range(50):
+            curr_img, _ =  nrrd.read(filepath + str(i) + '/warped.nrrd')
+            curr_img = np.float32(curr_img)
+            curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+            imgs.append(curr_img)
+        template, _ = nrrd.read(filepath + 'sphere.nrrd')
+        template = np.float32(template)
+        template = (template - np.mean(template)) / np.std(template)
+        n_batches = int(50*template.shape[0]/self.crop_sz[0]/self.batch_sz)
+        return imgs, template, n_batches
 
 
     def get_template(self):
@@ -301,9 +367,42 @@ class DataLoader():
 
         elif is_validation:
             idx, test_image = random.choice(list(enumerate(self.imgs)))
-            test_mask = self.masks[idx]
 
-        return idx, test_image, test_mask
+        return idx, test_image#, test_mask
+
+
+    def load_batch_toy(self):
+        for i in range(self.n_batches - 1):
+            batch_img = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1), dtype='float32')
+            batch_img_template = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1),dtype='float32')
+
+            num_imgs = 0
+            id = []
+
+            while num_imgs < self.batch_sz:
+                idx = np.random.randint(0, len(self.imgs))
+                id.append(idx)
+                chosen_img = self.imgs[idx]
+                batch_img[num_imgs,:,:,:,0] = chosen_img
+                batch_img_template[num_imgs,:,:,:,0] = self.img_template
+
+                num_imgs += 1
+
+            x_flip = np.random.randint(2, size=self.batch_sz)
+            z_flip = np.random.randint(2, size=self.batch_sz)
+            rot_angle = np.random.randint(4, size=self.batch_sz)
+            for j in range(self.batch_sz):
+                if x_flip[j]:
+                    batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=0)
+                    batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=0)
+                if z_flip[j]:
+                    batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=2)
+                    batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=2)
+                if rot_angle[j]:
+                    batch_img[j, :, :, :, 0] = np.rot90(batch_img[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    batch_img_template[j, :, :, :, 0] = np.rot90(batch_img_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+            yield batch_img, batch_img_template, id
+
 
 
     def load_batch(self, dataset_name ='fly'):
@@ -311,15 +410,15 @@ class DataLoader():
         for i in range(self.n_batches - 1):
             #print('----- loading a batch -----')
             batch_img = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1), dtype='float32')
-            batch_mask = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
+            #batch_mask = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
 
             batch_img_template = np.zeros((self.batch_sz, self.crop_sz[0], self.crop_sz[1], self.crop_sz[2], 1), dtype='float32')
-            batch_mask_template = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
+            #batch_mask_template = np.zeros((self.batch_sz, self.mask_sz[0], self.mask_sz[1], self.mask_sz[2], 1), dtype='float32')
 
             # randomly crop an image from imgs list
             idx = np.random.randint(0, len(self.imgs))
             img_for_crop = self.imgs[idx]
-            mask_for_crop = self.masks[idx]
+            #mask_for_crop = self.masks[idx]
 
             num_crop = 0
             while num_crop < self.batch_sz:
@@ -330,26 +429,30 @@ class DataLoader():
                 # crop in the x-y dimension only and use the all the slices for fish
                 cropped_img = img_for_crop[x:x+self.crop_sz[0], y:y+self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_img_template = self.img_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
-                cropped_mask = mask_for_crop[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
+                #cropped_mask = mask_for_crop[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 cropped_mask_template = self.mask_template[x:x + self.crop_sz[0], y:y + self.crop_sz[1], z:z+self.crop_sz[2]]
                 # if include the random crop in training
                 is_include = False
-                num_vox = len(cropped_mask[cropped_mask == 1])
+                #num_vox = len(cropped_mask[cropped_mask == 1])
+                num_vox = len(cropped_mask_template[cropped_mask_template == 1]) # Use the template mask instead for all the files
+
+                if (num_vox/len(cropped_mask_template)) > 0.80: # 75% of the crop is under the mask
+                    is_include = True
 
                 #accept_prob = np.random.random()
-                if num_vox > 500: #and accept_prob > 0.98:
-                    is_include = True
+                # if num_vox > 500: #and accept_prob > 0.98:
+                #     is_include = True
 
                 if is_include:
                     #if DEBUG: print('include this batch %d, %d, %d' %(x, y, z))
                     batch_img[num_crop,:,:,:,0] = cropped_img
-                    batch_mask[num_crop,:,:,:,0] = cropped_mask
+                    #batch_mask[num_crop,:,:,:,0] = cropped_mask
 
                     # filter the image with the mask
                     # batch_img = batch_img * batch_mask
 
                     batch_img_template[num_crop,:,:,:,0] = cropped_img_template
-                    batch_mask_template[num_crop,:,:,:,0] = cropped_mask_template
+                    #batch_mask_template[num_crop,:,:,:,0] = cropped_mask_template
 
                     # filter the template with the mask
                     #batch_img_template = batch_img_template * batch_mask_template
@@ -363,19 +466,19 @@ class DataLoader():
             for j in range(self.batch_sz):
                 if x_flip[j]:
                     batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=0)
-                    batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=0)
+                    #batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=0)
                     batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=0)
-                    batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=0)
+                    #batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=0)
                 if z_flip[j]:
                     batch_img[j, :, :, :, 0] = np.flip(batch_img[j, :, :, :, 0], axis=2)
-                    batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=2)
+                    #batch_mask[j, :, :, :, 0] = np.flip(batch_mask[j, :, :, :, 0], axis=2)
                     batch_img_template[j, :, :, :, 0] = np.flip(batch_img_template[j, :, :, :, 0], axis=2)
-                    batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=2)
+                    #batch_mask_template[j, :, :, :, 0] = np.flip(batch_mask_template[j, :, :, :, 0], axis=2)
                 if rot_angle[j]:
                     batch_img[j, :, :, :, 0] = np.rot90(batch_img[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
-                    batch_mask[j, :, :, :, 0] = np.rot90(batch_mask[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    #batch_mask[j, :, :, :, 0] = np.rot90(batch_mask[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
                     batch_img_template[j, :, :, :, 0] = np.rot90(batch_img_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
-                    batch_mask_template[j, :, :, :, 0] = np.rot90(batch_mask_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
+                    #batch_mask_template[j, :, :, :, 0] = np.rot90(batch_mask_template[j, :, :, :, 0], rot_angle[j], axes=(0, 1))
 
             yield batch_img, batch_img_template
 
