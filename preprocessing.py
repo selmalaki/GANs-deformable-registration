@@ -1,6 +1,7 @@
 
 import scipy.ndimage.morphology as morph
 import skimage.morphology as skimorph
+from scipy.spatial import ConvexHull
 from skimage import measure
 from skimage import filters
 from skimage import feature
@@ -12,6 +13,9 @@ import scipy.misc
 import nrrd
 import os
 
+
+from joblib import Parallel, delayed
+import multiprocessing
 
 __author__ = 'elmalakis'
 
@@ -44,11 +48,31 @@ class PreProcessing():
                     '20170301_31_B3_Scope_1_C1_down_result.nrrd',
                     '20170301_31_B5_Scope_1_C1_down_result.nrrd']
 
+        # num_cores = multiprocessing.cpu_count()
+        # _ = Parallel(n_jobs=num_cores)(delayed(self.create_mask(path=filesdir + f, outdir=outdir) for f in filelist))
+
         for f in filelist:
             self.create_mask(path=filesdir + f, outdir=outdir)
             print('--- Done ' + f + ' ---')
 
-        self.create_mask(path=path + template, outdir=outdir)
+        self.create_mask(path=path+template,  outdir=outdir)
+
+
+    def create_more_restricted_mask(self, path, outdir):
+        """create a mask using otsu thresholding"""
+        filename = os.path.basename(path)
+        filename = os.path.splitext(filename)[0]
+
+        image, header = nrrd.read(path)
+        val = filters.threshold_otsu(image)
+        blobs = image > val
+
+        mask = morph.binary_dilation(blobs, iterations=10)
+        mask = morph.binary_closing(mask, iterations=10)
+        mask = morph.binary_fill_holes(mask)
+        mask = measure.label(mask, background=0.0).astype('float32')
+        mask[mask > 0] = 1
+        nrrd.write(path + filename + '_mask_restricted.nrrd', mask, header=header)
 
 
     def create_mask(self, path, outdir):
@@ -68,10 +92,9 @@ class PreProcessing():
         # convert to binary to speed up next processing
         blobs = image > val
         # Dilation enlarges bright regions and shrinks dark regions
-        mask = morph.binary_dilation(blobs, iterations=2)
+        mask = morph.binary_dilation(blobs, iterations=75)
         # Closing remove pepper spots and connects small bright cracks. Close up dark gaps between bright features
-        mask = morph.binary_closing(mask, iterations=2)
-        mask = morph.binary_fill_holes(mask)
+        mask = morph.binary_closing(mask, iterations=4)
 
         # Create a convex hull - Not the fastest way
         #for z in range(0, mask.shape[2]):
@@ -81,9 +104,12 @@ class PreProcessing():
         # convert to 0 and 1 float
         mask = measure.label(mask, background=0.0).astype('float32')
         mask[ mask > 0] = 1
-        nrrd.write(outdir+filename+'_mask.nrrd', mask, header=header)
+        nrrd.write(outdir+filename+'_dilated_mask.nrrd', mask, header=header)
+
+        #print('--- Done ' + filename + ' ---')
 
         return mask
+
 
 
     def normalize_intensity(self, image):
