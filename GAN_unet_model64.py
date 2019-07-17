@@ -123,7 +123,7 @@ class GANUnetModel64():
                                       dataset_name='fly',
                                       min_max=False,
                                       restricted_mask=False,
-                                      use_hist_equilized_data=True)
+                                      use_hist_equilized_data=False)
 
     """
     Generator Network
@@ -364,6 +364,8 @@ class GANUnetModel64():
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)
+        gt = 1 # how many training steps for generator
+        dt = 1 # how many training steps for discriminator
 
         # hard labels
         validhard = np.ones((self.batch_sz,) + disc_patch)
@@ -435,7 +437,9 @@ class GANUnetModel64():
                 # ---------------------
                 # Train the generator (to fool the discriminator)
                 #self.discriminator.trainable = False
+                #for _ in range(gt):
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template], validhard)
+
 
                 elapsed_time = datetime.datetime.now() - start_time
 
