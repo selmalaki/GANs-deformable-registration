@@ -83,18 +83,18 @@ class PreProcessing():
         image, header = nrrd.read(path)
         image = self.normalize_intensity(image)
         image = self.hist_equalization(image)
-        nrrd.write(outdir+filename+ '_histogram_normalized.nrrd', image, header=header)
+        #nrrd.write(outdir+filename+ '_histogram_normalized.nrrd', image, header=header)
 
-        normalized_image = (image - np.mean(image)) / np.std(image)
-        nrrd.write(outdir + filename + '_normalized.nrrd', normalized_image, header=header)
+        #normalized_image = (image - np.mean(image)) / np.std(image)
+        #nrrd.write(outdir + filename + '_normalized.nrrd', normalized_image, header=header)
 
         val = filters.threshold_otsu(image)
         # convert to binary to speed up next processing
         blobs = image > val
         # Dilation enlarges bright regions and shrinks dark regions
-        mask = morph.binary_dilation(blobs, iterations=75)
+        mask = morph.binary_dilation(blobs, iterations=20)
         # Closing remove pepper spots and connects small bright cracks. Close up dark gaps between bright features
-        mask = morph.binary_closing(mask, iterations=4)
+        mask = morph.binary_closing(mask, iterations=10)
 
         # Create a convex hull - Not the fastest way
         #for z in range(0, mask.shape[2]):
