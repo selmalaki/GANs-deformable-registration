@@ -191,7 +191,7 @@ class DataLoader():
                        filepath_un + '20161220_32_C1_Scope_3_C1_down_result.nrrd',
                        filepath_un + '20161220_32_C3_Scope_3_C1_down_result.nrrd',
                        filepath_un + '20170223_32_A2_Scope_3_C1_down_result.nrrd',
-                       filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
+                      # filepath_un + '20170223_32_A3_Scope_3_C1_down_result.nrrd',
                        filepath_un + '20170223_32_A6_Scope_2_C1_down_result.nrrd',
                        filepath_un + '20170223_32_E1_Scope_3_C1_down_result.nrrd',
                        filepath_un + '20170223_32_E2_Scope_3_C1_down_result.nrrd',
@@ -237,15 +237,17 @@ class DataLoader():
             img_template, templ_header = nrrd.read(filepath + '20170223_32_A3_Scope_3_C1_down_result_histogram_normalized.nrrd')
             mask_template, templ_header = nrrd.read(filepath + '20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
 
-
             img_template = np.float32(img_template)
             mask_template = np.float32(mask_template)
 
             # Apply the template mask before the normalization
             img_template = img_template * mask_template
-            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
+            mask = 1 - mask_template
+            mask = np.uint8(mask)
+            img_template_masked = np.ma.array(img_template, mask=mask)
+            img_template = (img_template - np.mean(img_template_masked)) / np.std(img_template_masked)
             if min_max:
-                img_template = (2 * (img_template - np.min(img_template)) / (np.max(img_template) - np.min(img_template))) - 1
+                img_template = (2 * (img_template - np.min(img_template_masked)) / (np.max(img_template_masked) - np.min(img_template_masked))) - 1
 
             print('----- loading histogram equalized data files -----')
             for i in range(len(img_pp_normalized)):
@@ -275,23 +277,35 @@ class DataLoader():
                 #masks.append(curr_mask)
                 imgs.append(curr_img)
 
+
         else:
             # template
             filepath_t = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-            img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
-            mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
-            if restricted_mask:
-                mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask_restricted.nrrd')
+            # img_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo.nrrd')
+            # mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask.nrrd')
+            # if restricted_mask:
+            #     mask_template, templ_header = nrrd.read(filepath_t + 'JRC2018_lo_mask_restricted.nrrd')
+
+            # For testing use template from the actual dataset (20170223_32_A3_Scope_3_C1_down_result)
+            img_template, templ_header = nrrd.read(
+                filepath_t + 'proc/' '20170223_32_A3_Scope_3_C1_down_result.nrrd')
+            mask_template, templ_header = nrrd.read(
+                filepath_t + 'preprocessed_convexhull/' '20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
 
             mask_template = np.float32(mask_template)
             img_template = np.float32(img_template)
             # Apply the template mask before the normalization
-            img_template = img_template * mask_template
+            #img_template = img_template * mask_template
 
-            img_template = (img_template - np.mean(img_template)) / np.std(img_template)
-            if min_max: # Scale the image from 0 to 1
-                img_template = (2 * (img_template - np.min(img_template)) / (np.max(img_template) - np.min(img_template))) - 1
+            mask = 1 - mask_template
+            mask = np.uint8(mask)
+            img_template_masked = np.ma.array(img_template, mask=mask)
+            img_template = (img_template - np.mean(img_template_masked)) / np.std(img_template_masked)
+            if min_max:
+                img_template = (2 * (img_template - np.min(img_template_masked)) / (
+                            np.max(img_template_masked) - np.min(img_template_masked))) - 1
 
+            nrrd.write(filepath_t + '20170223_32_A3_Scope_3_C1_down_result_undermask.nrrd', img_template, header=templ_header)
 
             print('----- loading normal data files -----')
             for i in range(len(img_pp)):
@@ -300,16 +314,17 @@ class DataLoader():
                 curr_img = np.float32(curr_img)
 
                 # Apply the template mask before the standardization
-                curr_img  = curr_img * mask_template
+                #curr_img  = curr_img * mask_template
 
-                curr_img = (curr_img - np.mean(curr_img)) / np.std(curr_img)
+                img_masked = np.ma.array(curr_img, mask=mask)
+                curr_img = (curr_img - np.mean(img_masked)) / np.std(img_masked)
                 # image normalization
                 if min_max:
-                    curr_img = (2* (curr_img - np.min(curr_img))/(np.max(curr_img)-np.min(curr_img))) -1
+                    curr_img = (2* (curr_img - np.min(img_masked))/(np.max(img_masked)-np.min(img_masked))) -1
                 # masks 1: interesting value, 0: not interesting value
-                curr_mask, mask_header = nrrd.read(mask_pp[i])
-                curr_mask = np.float32(curr_mask)
-                masks.append(curr_mask)
+                #curr_mask, mask_header = nrrd.read(mask_pp[i])
+                #curr_mask = np.float32(curr_mask)
+                #masks.append(curr_mask)
                 imgs.append(curr_img)
 
 
@@ -436,7 +451,7 @@ class DataLoader():
                 #num_vox = len(cropped_mask[cropped_mask == 1])
                 num_vox = len(cropped_mask_template[cropped_mask_template == 1]) # Use the template mask instead for all the files
 
-                if (num_vox/len(cropped_mask_template)) > 0.80: # 75% of the crop is under the mask
+                if (num_vox/len(cropped_mask_template)) > 0.90: # 75% of the crop is under the mask
                     is_include = True
 
                 #accept_prob = np.random.random()
