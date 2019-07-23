@@ -7,11 +7,14 @@ from skimage import filters
 from skimage import feature
 from scipy import spatial
 from scipy import ndimage
+from scipy import misc
 import nibabel as nib
 import numpy as np
-import scipy.misc
 import nrrd
 import os
+
+from dipy.denoise.nlmeans import nlmeans
+from dipy.denoise.noise_estimate import estimate_sigma
 
 
 from joblib import Parallel, delayed
@@ -138,7 +141,19 @@ class PreProcessing():
         e = np.floor(H[flat] * 255.)
         return e.reshape(image.shape)
 
+    def denoise_image(self, image, mask):
+        sigma = estimate_sigma(image, N=4)
+        den = nlmeans(image, sigma=sigma, mask=mask, patch_radius=1, block_radius=1, rician=True)
+        diff = np.abs(den.astype('f8') - image.astype('f8'))
+        return den, diff
 
+    def sharpening(self, image):
+        blurred_f = ndimage.gaussian_filter(image, 3)
+        filter_blurred_f = ndimage.gaussian_filter(blurred_f, 1)
+        alpha = 30
+        sharpened = blurred_f + alpha * (blurred_f - filter_blurred_f)
+        diff = np.abs(sharpened.astype('f8') - image.astype('f8'))
+        return sharpened, diff
 
 
 if __name__ == '__main__':
