@@ -6,9 +6,9 @@ import tensorflow as tf
 
 from keras.layers import BatchNormalization
 from keras.layers import Input, Dropout, Concatenate, Cropping3D
-from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D
-
+from keras.layers.advanced_activations import LeakyReLU
+from keras.layers.core import Lambda
 from keras.optimizers import Adam
 from keras.models import Model
 
@@ -18,8 +18,11 @@ import nrrd
 import os
 
 
+# locally
+#from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
 #from ImageRegistrationGANs.data_loader import DataLoader
 from data_loader import DataLoader   #To run on the cluster
+from helpers import dense_image_warp_3D, numerical_gradient_3D, make_parallel #To run on the cluster'
 
 __author__ = 'elmalakis'
 
@@ -36,16 +39,25 @@ class GAN_pix2pix():
         self.img_cols = 128
         self.img_vols = 128
         self.channels = 1
-        self.img_shape = (self.img_rows, self.img_cols, self.img_vols, self.channels )
-
-
         self.batch_sz = 4 # for testing locally to avoid memory allocation
-        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly', crop_size=(self.img_rows, self.img_cols, self.img_vols))
 
+        self.crop_size = (self.img_rows, self.img_cols, self.img_vols)
+
+        self.img_shape = self.crop_size + (self.channels,)
+
+        self.data_loader = DataLoader(batch_sz=self.batch_sz,
+                                      crop_size=self.crop_size,
+                                      dataset_name='fly',
+                                      min_max=False,
+                                      restricted_mask=False,
+                                      use_hist_equilized_data=False,
+                                      use_sharpen=False)
 
         # Calculate output shape of D (PatchGAN)
         patch = int(self.img_rows / 2 ** 4)
-        self.disc_patch = (patch, patch, patch, 1)
+        self.output_shape_d = (patch, patch, patch,  self.channels)
+        self.output_shape_g = self.crop_size + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
+
 
         # Number of filters in the first layer of G and D
         self.gf = 64
@@ -55,6 +67,7 @@ class GAN_pix2pix():
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
+        self.discriminator.summary()
         self.discriminator.compile(loss='mse',
                                    optimizer=optimizer,
                                    metrics=['accuracy'])
@@ -66,21 +79,27 @@ class GAN_pix2pix():
 
         # Build the generator
         self.generator = self.build_generator()
+        self.generator.summary()
+
+        self.transformation = self.build_transformation()
+        self.transformation.summary()
 
         # Input images and their conditioning images
-        img_A = Input(shape=self.img_shape)
-        img_B = Input(shape=self.img_shape)
+        img_S = Input(shape=self.img_shape)
+        img_T = Input(shape=self.img_shape)
 
-        # By conditioning on B generate a fake version of A
-        fake_A = self.generator(img_B)
-
+        # Generate the deformable funtion
+        phi = self.generator([img_S, img_T])
+        # Transform S
+        warped_S = self.transformation([img_S, phi])
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
 
         # Discriminators determines validity of translated images / condition pairs
-        valid = self.discriminator([fake_A, img_B])
+        validity = self.discriminator([warped_S, img_T])
 
-        self.combined = Model(inputs=[img_A, img_B], outputs=[valid, fake_A])
+        self.combined = Model(inputs=[img_S, img_T], outputs=[validity, warped_S])
+        self.combined.summary()
         self.combined.compile(loss=['mse', 'mae'],
                               loss_weights=[1, 100],
                               optimizer=optimizer)
@@ -102,7 +121,7 @@ class GAN_pix2pix():
                 d = BatchNormalization(momentum=0.8)(d)
             return d
 
-        def deconv2d(layer_input, skip_input, filters, f_size=4, dropout_rate=0.5): # dropout is 50 ->change from the implementaion
+        def deconv2d(layer_input, skip_input, filters, f_size=4, dropout_rate=0): # dropout is 50 ->change from the implementaion
             """Layers used during upsampling"""
             u = UpSampling3D(size=2)(layer_input)
             u = Conv3D(filters, kernel_size=f_size, padding='same', activation='relu')(u) # remove the strides
@@ -112,8 +131,11 @@ class GAN_pix2pix():
             u = Concatenate()([u, skip_input])
             return u
 
-        # Image input
-        d0 = Input(shape=self.img_shape)    #128x128x182
+
+        img_S = Input(shape=self.img_shape, name='input_img_S')
+        img_T = Input(shape=self.img_shape, name='input_img_T')
+
+        d0 = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])    #128x128x182
 
         # Downsampling
         d1 = conv2d(d0, self.gf, bn=False)   #64x64x64
@@ -133,9 +155,9 @@ class GAN_pix2pix():
         u6 = deconv2d(u5, d1, self.gf)       #64x64x64
 
         u7 = UpSampling3D(size=2)(u6)        #128x128x128 #the original architecture from the paper is a bit different
-        output_img = Conv3D(self.channels, kernel_size=4, strides=1, padding='same', activation='tanh')(u7)
+        phi = Conv3D(filters=3, kernel_size=4, strides=1, padding='same', activation='tanh')(u7)
 
-        return Model(d0, output_img)
+        return  Model([img_S, img_T], outputs=phi, name='generator_model')
 
 
     def build_discriminator(self):
@@ -159,52 +181,72 @@ class GAN_pix2pix():
         d3 = d_layer(d2, self.df*4)
         d4 = d_layer(d3, self.df*8)
 
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same')(d4)
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same',name='disc_sig')(d4) #original is linear activation no sigmoid
 
-        return Model([img_A, img_B], validity)
+        return Model([img_A, img_B], validity, name='discriminator_model')
+
+
+    def build_transformation(self):
+        img_S = Input(shape=self.img_shape, name='input_img_S_transform')      # 128x128x128
+        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 128x128x128
+
+        #img_S_cropped = Cropping3D(cropping=40)(img_S)  # 68x68x68
+        warped_S = Lambda(dense_image_warp_3D, output_shape=self.img_shape)([img_S, phi])
+
+        return Model([img_S, phi], warped_S,  name='transformation_layer')
 
 
     """
     Training
     """
-    def train(self, epochs, batch_size=4, sample_interval=50):
+    def train(self, epochs, batch_size=1, sample_interval=50):
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated/' , exist_ok=True)
-
+        os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
+        output_sz = 128
+        input_sz = 128
+        gap = int((input_sz - output_sz)/2)
         # Adversarial loss ground truths
-        valid = np.ones((batch_size,) + self.disc_patch)
-        fake = np.zeros((batch_size,) + self.disc_patch)
+        valid = np.ones((self.batch_sz,) + self.output_shape_d)
+        fake = np.zeros((self.batch_sz,) + self.output_shape_d)
 
         start_time = datetime.datetime.now()
         for epoch in range(epochs):
-            for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch()):
+            for batch_i, (batch_img, batch_img_template, batch_img_golden) in enumerate(self.data_loader.load_batch()):
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
                 # Condition on B and generate a translate
-                fake_A = self.generator.predict(batch_img)
-                self.discriminator.trainable = True
+                phi = self.generator.predict([batch_img, batch_img_template])
+                transform = self.transformation.predict([batch_img, phi])
+                # Create a ref image by perturbing th subject image with the template image
+                perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
+                batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
+
                 # Train the discriminators (original images = real / generated = Fake)
-                d_loss_real = self.discriminator.train_on_batch([batch_img, batch_img_template], valid)
-                d_loss_fake = self.discriminator.train_on_batch([fake_A, batch_img_template], fake)
+                d_loss_real = self.discriminator.train_on_batch([batch_ref, batch_img_template], valid)
+                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # -----------------
                 #  Train Generator
                 # -----------------
 
-                # Train the generators
-                self.discriminator.trainable = False
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img]) # The original implemntation has batch_img in the output
+                # Train the generator
+
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_ref]) # The original implemntation has batch_img in the output
 
                 elapsed_time = datetime.datetime.now() - start_time
-                # Plot the progress
-                print ("[Epoch %d/%d] [Batch %d/%d] [D loss: %f, acc: %3d%%] [G loss: %f] time: %s" % (epoch, epochs,
-                                                                        batch_i, self.data_loader.n_batches,
-                                                                        d_loss[0], 100*d_loss[1],
-                                                                        g_loss[0],
-                                                                        elapsed_time))
+
+                print(
+                    "[Epoch %d/%d] [Batch %d/%d] [D loss average: %f, acc average: %3d%%, D loss fake:%f, acc: %3d%%, D loss real: %f, acc: %3d%%] [G loss: %f]  time: %s"
+                    % (epoch, epochs,
+                       batch_i, self.data_loader.n_batches,
+                       d_loss[0], 100 * d_loss[1],
+                       d_loss_fake[0], 100 * d_loss_fake[1],
+                       d_loss_real[0], 100 * d_loss_real[1],
+                       g_loss[0],
+                       elapsed_time))
 
 
                 if self.DEBUG:
@@ -212,7 +254,7 @@ class GAN_pix2pix():
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0:
+                if batch_i % sample_interval == 0 and epoch != 0 and epoch % 5 == 0:
                     self.sample_images(epoch, batch_i)
 
 
@@ -231,35 +273,33 @@ class GAN_pix2pix():
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
 
-        idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
-        # imgs_T = self.data_loader.img_template
-
+        idx, imgs_S = self.data_loader.load_data(is_validation=True)
+        imgs_T = self.data_loader.img_template
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
 
-        input_sz = (128, 128, 128)
+        input_sz = self.crop_size
         step = (32, 32, 32)
 
         gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
         start_time = datetime.datetime.now()
-
-
 
         for row in range(0, imgs_S.shape[0] - input_sz[0], step[0]):
             for col in range(0, imgs_S.shape[1] - input_sz[1], step[1]):
                 for vol in range(0, imgs_S.shape[2] - input_sz[2], step[2]):
 
                     patch_sub_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_S.dtype)
-                    # patch_templ_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_T.dtype)
+                    patch_templ_img = np.zeros((1, input_sz[0], input_sz[1], input_sz[2], 1), dtype=imgs_T.dtype)
 
                     patch_sub_img[0, :, :, :, 0] = imgs_S[row:row + input_sz[0],
                                                          col:col + input_sz[1],
                                                          vol:vol + input_sz[2]]
-                    # patch_templ_img[0, :, :, :, 0] = imgs_T[row:row + input_sz[0],
-                    #                                   col:col + input_sz[1],
-                    #                                   vol:vol + input_sz[2]]
+                    patch_templ_img[0, :, :, :, 0] = imgs_T[row:row + input_sz[0],
+                                                       col:col + input_sz[1],
+                                                       vol:vol + input_sz[2]]
 
-                    patch_predict_warped = self.generator.predict(patch_sub_img)
+                    patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
+                    patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
 
                     predict_img[row :row + input_sz[0],
                                 col :col + input_sz[1],
@@ -270,7 +310,7 @@ class GAN_pix2pix():
 
         nrrd.write(path+"generated_pix2pix/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
 
-        file_name = 'gan_network'
+        file_name = 'gan_network' +str(epoch)
         # save the whole network
         gan.combined.save(path+'generated_pix2pix/'+file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
@@ -299,7 +339,7 @@ if __name__ == '__main__':
     #K.set_session(sess)
 
     gan = GAN_pix2pix()
-    gan.train(epochs=20000, batch_size=4, sample_interval=200)
+    gan.train(epochs=20000, batch_size=1, sample_interval=200)
 
 
 
