@@ -10,6 +10,7 @@ from scipy import ndimage
 from scipy import misc
 import nibabel as nib
 import numpy as np
+import ntpath
 import nrrd
 import os
 
@@ -18,47 +19,83 @@ from dipy.denoise.noise_estimate import estimate_sigma
 
 
 from joblib import Parallel, delayed
-import multiprocessing
+from multiprocessing import Pool
 
 __author__ = 'elmalakis'
 
 class PreProcessing():
 
-    def __init__(self):
-        pass
+    def __init__(self, path, outdir):
+        self.path = path
+        self.outdir = outdir
 
-    def preprocess(self, path, outdir):
-        filesdir = path + 'proc/'
-        template = 'JRC2018_lo.nrrd'
-        filelist = ['20161102_32_C1_Scope_1_C1_down_result.nrrd',
-                    '20161102_32_C3_Scope_4_C1_down_result.nrrd',
-                    '20161102_32_D1_Scope_1_C1_down_result.nrrd',
-                    '20161102_32_D2_Scope_1_C1_down_result.nrrd',
-                    '20161102_32_E1_Scope_1_C1_down_result.nrrd',
-                    '20161102_32_E3_Scope_4_C1_down_result.nrrd',
-                    '20161220_31_I1_Scope_2_C1_down_result.nrrd',
-                    '20161220_31_I2_Scope_6_C1_down_result.nrrd',
-                    '20161220_31_I3_Scope_6_C1_down_result.nrrd',
-                    '20161220_32_C1_Scope_3_C1_down_result.nrrd',
-                    '20161220_32_C3_Scope_3_C1_down_result.nrrd',
-                    '20170223_32_A2_Scope_3_C1_down_result.nrrd',
-                    '20170223_32_A3_Scope_3_C1_down_result.nrrd',
-                    '20170223_32_A6_Scope_2_C1_down_result.nrrd',
-                    '20170223_32_E1_Scope_3_C1_down_result.nrrd',
-                    '20170223_32_E2_Scope_3_C1_down_result.nrrd',
-                    '20170223_32_E3_Scope_3_C1_down_result.nrrd',
-                    '20170301_31_B1_Scope_1_C1_down_result.nrrd',
-                    '20170301_31_B3_Scope_1_C1_down_result.nrrd',
-                    '20170301_31_B5_Scope_1_C1_down_result.nrrd']
+        self.filesdir = path + 'proc/'
+        self.template = 'JRC2018_lo.nrrd'
+        self.template_mask = None
 
-        # num_cores = multiprocessing.cpu_count()
-        # _ = Parallel(n_jobs=num_cores)(delayed(self.create_mask(path=filesdir + f, outdir=outdir) for f in filelist))
+        self.filelist = ['20161102_32_C1_Scope_1_C1_down_result.nrrd',
+                         '20161102_32_C3_Scope_4_C1_down_result.nrrd',
+                         '20161102_32_D1_Scope_1_C1_down_result.nrrd',
+                         '20161102_32_D2_Scope_1_C1_down_result.nrrd',
+                         '20161102_32_E1_Scope_1_C1_down_result.nrrd',
+                         '20161102_32_E3_Scope_4_C1_down_result.nrrd',
+                         '20161220_31_I1_Scope_2_C1_down_result.nrrd',
+                         '20161220_31_I2_Scope_6_C1_down_result.nrrd',
+                         '20161220_31_I3_Scope_6_C1_down_result.nrrd',
+                         '20161220_32_C1_Scope_3_C1_down_result.nrrd',
+                         '20161220_32_C3_Scope_3_C1_down_result.nrrd',
+                         '20170223_32_A2_Scope_3_C1_down_result.nrrd',
+                         '20170223_32_A3_Scope_3_C1_down_result.nrrd',
+                         '20170223_32_A6_Scope_2_C1_down_result.nrrd',
+                         '20170223_32_E1_Scope_3_C1_down_result.nrrd',
+                         '20170223_32_E2_Scope_3_C1_down_result.nrrd',
+                         '20170223_32_E3_Scope_3_C1_down_result.nrrd',
+                         '20170301_31_B1_Scope_1_C1_down_result.nrrd',
+                         '20170301_31_B3_Scope_1_C1_down_result.nrrd',
+                         '20170301_31_B5_Scope_1_C1_down_result.nrrd']
 
-        for f in filelist:
-            self.create_mask(path=filesdir + f, outdir=outdir)
+        self.allfiles = [self.filesdir+f for f in self.filelist]
+        self.allfiles.append(path+self.template)
+
+
+    def create_mask_train_examples(self):
+        for f in self.filelist:
+            self.create_mask(path=self.filesdir + f, outdir=self.outdir)
             print('--- Done ' + f + ' ---')
 
-        self.create_mask(path=path+template,  outdir=outdir)
+        self.create_template_mask()
+
+
+    def create_template_mask(self):
+        self.template_mask = self.create_mask(path=path+self.template,  outdir=self.outdir)
+        print('--- Done template masking ---')
+        return self.template_mask
+
+
+
+    def create_sharpened_train_examples(self, cur_file):
+
+        if self.template_mask is None:
+            try:
+                self.template_mask,_ = nrrd.read(self.path+self.template)
+            except Exception as e:
+                self.create_template_mask()
+
+        cur_img, _ = nrrd.read(cur_file)
+        den, _ = self.denoise_image(image=cur_img, mask=self.template_mask)
+        sharp, diff = self.sharpening(image=den)
+
+        nrrd.write(self.outdir + ntpath.basename(cur_file) + '_sharp.nrrd', sharp)
+        nrrd.write(self.outdir + ntpath.basename(cur_file)  + '_sharp_diff.nrrd', sharp)
+        print('finish sharpening: '+cur_file)
+
+
+    def parallel_create_sharpened_train_examples(self):
+
+        #print(self.allfiles)
+        with Pool(16) as p:
+            p.map(self.create_sharpened_train_examples, self.allfiles )
+
 
 
     def create_more_restricted_mask(self, path, outdir):
@@ -114,7 +151,6 @@ class PreProcessing():
         return mask
 
 
-
     def normalize_intensity(self, image):
         """Intensity normalization
         ---------------------------
@@ -161,8 +197,8 @@ if __name__ == '__main__':
     os.makedirs(path + 'preprocessed_convexhull/', exist_ok=True)
     outdir = path+'preprocessed_convexhull/'
     #outdir_test = path+'preprocessed/test_masks/'
-    pp = PreProcessing()
-    pp.preprocess(path, outdir)
+    pp = PreProcessing(path, outdir)
+    pp.parallel_create_sharpened_train_examples()
     #pp.create_mask(path + 'proc/20161102_32_C1_Scope_1_C1_down_result.nrrd', outdir=outdir_test)
     #preprocess.create_mask(path + 'proc/20161102_32_C1_Scope_1_C1_down_result.nrrd', outdir=outdir)
     #preprocess.create_mask(path + 'JRC2018_lo.nrrd')
