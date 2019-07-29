@@ -23,9 +23,13 @@ import nrrd
 import os
 
 
-from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
-from ImageRegistrationGANs.image_warping import dense_image_warp_3D_dipy, dense_image_warp_3D_scikit
-from ImageRegistrationGANs.data_loader import DataLoader
+#from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
+#from ImageRegistrationGANs.image_warping import dense_image_warp_3D_dipy, dense_image_warp_3D_scikit
+#from ImageRegistrationGANs.data_loader import DataLoader
+from data_loader import DataLoader   #To run on the cluster'
+from helpers import dense_image_warp_3D, numerical_gradient_3D #To run on the cluster'
+
+
 
 __author__ = 'elmalakis'
 
@@ -47,7 +51,7 @@ class GANUnetModel64_v2():
         self.output_shape_d = (6, 6, 6) + (self.channels,)
         self.output_shape_d_v2 = (3, 3, 3) + (self.channels,)
 
-        self.batch_sz = 2 # for testing locally to avoid memory allocation
+        self.batch_sz = 4 # for testing locally to avoid memory allocation
         self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly')
 
         # Number of filters in the first layer of G and D
@@ -463,8 +467,8 @@ class GANUnetModel64_v2():
                 if self.DEBUG:
                     self.write_log(self.tensorboard, ['g_loss'], [g_loss], batch_i)
                     self.write_log(self.tensorboard, ['d_loss'], [d_loss[0]], batch_i)
-                    weight_grad_gen = self.get_weight_grad(self.combined, [batch_img, batch_img_template], validhard )
-                    weight_grad_disc = self.get_weight_grad(self.discriminator, [transform, batch_img_template], fakehard)
+                   # weight_grad_gen = self.get_weight_grad(self.combined, [batch_img, batch_img_template], validhard )
+                   # weight_grad_disc = self.get_weight_grad(self.discriminator, [transform, batch_img_template], fakehard)
 
                     #grad_gen = self.get_layer_output_grad(self.combined, [batch_img, batch_img_template], validhard)
                     #grad_disc = self.get_layer_output_grad(self.discriminator, [transform, batch_img_template], fakehard)
@@ -474,7 +478,7 @@ class GANUnetModel64_v2():
 
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0:
+                if batch_i % sample_interval == 0 and epoch != 0:
                     self.sample_images(epoch, batch_i)
 
 
@@ -557,12 +561,8 @@ class GANUnetModel64_v2():
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         os.makedirs(path+'generated_unet/' , exist_ok=True)
 
-        idx, imgs_S, imgs_S_mask = self.data_loader.load_data(is_validation=True)
+        idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
-        #imgs_T_mask = self.data_loader.mask_template
-
-        #imgs_S = imgs_S * imgs_S_mask
-        #imgs_T = imgs_T * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
         predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
