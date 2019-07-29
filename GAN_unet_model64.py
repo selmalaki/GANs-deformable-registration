@@ -106,8 +106,8 @@ class GANUnetModel64():
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
         self.combined.summary()
-        self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
-        #self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
+        #self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
+        self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
         #self.discriminator.trainable = True
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
@@ -300,8 +300,8 @@ class GANUnetModel64():
         d3 = d_layer(d2, self.df*4, name='d3')
         d4 = d_layer(d3, self.df*8, name='d4')
 
-        #d5 = Flatten()(d4)
-        #validity = Dense(1, activation='sigmoid')(d5)
+       # d5 = Flatten()(d4)
+       # validity = Dense(1, activation='sigmoid')(d5)
 
         validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='disc_sig')(d4) # 2x2x2
 
@@ -319,7 +319,7 @@ class GANUnetModel64():
         img_S_cropped = Cropping3D(cropping=20)(img_S)  # 24x24x24
         warped_S = Lambda(dense_image_warp_3D, output_shape=(24,24,24,1))([img_S_cropped, phi])
 
-        return Model([img_S, phi], warped_S)
+        return Model([img_S, phi], warped_S,  name='transformation_layer')
 
 
     """
@@ -364,8 +364,6 @@ class GANUnetModel64():
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)
-        gt = 1 # how many training steps for generator
-        dt = 1 # how many training steps for discriminator
 
         # hard labels
         validhard = np.ones((self.batch_sz,) + disc_patch)
@@ -380,10 +378,13 @@ class GANUnetModel64():
         #smooth = 0.1 # validhard -smooth
         #validsoft =  0.9 + 0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)     # random between [0.9, 1)
         #fakesoft =  0.1 * np.random.random_sample((self.batch_sz,) + disc_patch)           # random between [0, 0.1)
+        validsoft = np.random.uniform(low=0.7, high=1.2, size=(self.batch_sz,) + disc_patch)
+        fakesoft = np.random.uniform(low=0.0, high=0.3, size=(self.batch_sz,) + disc_patch)
+
 
         start_time = datetime.datetime.now()
         for epoch in range(epochs):
-            for batch_i, (batch_img, batch_img_template) in enumerate(self.data_loader.load_batch()):
+            for batch_i, (batch_img, batch_img_template, batch_img_golden) in enumerate(self.data_loader.load_batch()):
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
@@ -398,17 +399,22 @@ class GANUnetModel64():
                 #assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
-                perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
-                batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
+                # perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
+                # batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
-                batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
+                # batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
                 batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
+                batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
+
                 # take only (24,24,24) from the (64,64,64) size
                 batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
-                batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
+                # batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz, :]
+                batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
                 batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
@@ -421,13 +427,12 @@ class GANUnetModel64():
 
                 # Train the discriminator (R -> T is valid, S -> T is fake)
                 # Noisy and soft labels
-                #self.discriminator.trainable = True
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], fakehard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
@@ -436,10 +441,7 @@ class GANUnetModel64():
                 #  Train Generator
                 # ---------------------
                 # Train the generator (to fool the discriminator)
-                #self.discriminator.trainable = False
-                #for _ in range(gt):
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template], validhard)
-
 
                 elapsed_time = datetime.datetime.now() - start_time
 
@@ -461,10 +463,6 @@ class GANUnetModel64():
                 # If at save interval => save generated image samples
                 if batch_i % sample_interval == 0 and epoch != 0:
                     self.sample_images(epoch, batch_i)
-
-                # If at save interval => save generated image samples
-            #if epoch % sample_interval == 0
-            #self.sample_images(epoch, batch_i) #save by the end of each epoch
 
 
     def write_log(self, callback, names, logs, batch_no):
