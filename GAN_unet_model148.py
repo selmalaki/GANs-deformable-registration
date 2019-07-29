@@ -15,6 +15,9 @@ from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
 from keras.optimizers import Adam
 from keras.models import Model, Sequential
 
+from keras.utils import multi_gpu_model
+
+
 import matplotlib.pyplot as plt
 from functools import partial
 import numpy as np
@@ -27,7 +30,7 @@ import os
 #from ImageRegistrationGANs.data_loader import DataLoader
 
 from data_loader import DataLoader   #To run on the cluster'
-from helpers import dense_image_warp_3D, numerical_gradient_3D #To run on the cluster'
+from helpers import dense_image_warp_3D, numerical_gradient_3D, make_parallel #To run on the cluster'
 
 
 __author__ = 'elmalakis'
@@ -41,23 +44,22 @@ class GANUnetModel64():
         K.set_image_dim_ordering('tf')
         self.DEBUG = 1
 
-        self.crop_size_g = (196, 196, 196)
-        self.crop_size_d = (116, 116, 116)
+        self.crop_size_g = (148, 148, 148)
+        self.crop_size_d = (68, 68, 68)
 
         self.channels = 1
         self.input_shape_g = self.crop_size_g + (self.channels,)
         self.input_shape_d = self.crop_size_d + (self.channels,)
-        self.output_shape_g = (116, 116, 116) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
+        self.output_shape_g = (68, 68, 68) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
         self.output_shape_d = (6, 6, 6) + (self.channels,)
-        self.output_shape_d_v2 = (8, 8, 8) + (self.channels,)
+        self.output_shape_d_v2 = (5, 5, 5) + (self.channels,)
 
-        self.batch_sz = 16 # for testing locally to avoid memory allocation
+        self.batch_sz = 1 # for testing locally to avoid memory allocation
 
         # Number of filters in the first layer of G and D
-        self.gf = 64
-        self.df = 64
+        self.gf = 16
+        self.df = 16
 
-        # Train the discriminator faster than the generator
         optimizerD = Adam(0.001, decay=0.00005) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
@@ -66,10 +68,13 @@ class GANUnetModel64():
 
         # Build the three networks
         self.generator = self.build_generator()
+        #self.generator = make_parallel(self.generator, gpu_count=4)
         self.generator.summary()
         self.discriminator = self.build_discriminator_v2()
+        #self.discriminator  = make_parallel(self.discriminator, gpu_count=4)
         self.discriminator.summary()
         self.transformation = self.build_transformation()
+        #self.transformation = make_parallel(self.transformation, gpu_count=4)
         self.transformation.summary()
 
         # Compile the discriminator
@@ -101,9 +106,10 @@ class GANUnetModel64():
 
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
+        #self.combined = multi_gpu_model(self.combined, gpus=4)
         self.combined.summary()
-        #self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
-        self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
+        self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
+        #self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
         #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
         #self.combined.compile(loss=[partial_gp_loss, 'mae'],
         #                      loss_weights=[1, 100],
@@ -119,7 +125,8 @@ class GANUnetModel64():
                                       dataset_name='fly',
                                       min_max=False,
                                       restricted_mask=False,
-                                      use_hist_equilized_data=False)
+                                      use_hist_equilized_data=False,
+                                      use_sharpen=True)
 
     """
     Generator Network
@@ -181,23 +188,23 @@ class GANUnetModel64():
 
 
         input_shape = self.input_shape_g
-        img_S = Input(shape=input_shape, name='input_img_S')                                            # 196x196x196
-        img_T = Input(shape=input_shape, name='input_img_T')                                            # 196x196x196
+        img_S = Input(shape=input_shape, name='input_img_S')                                            # 148x148x148
+        img_T = Input(shape=input_shape, name='input_img_T')                                            # 148x148x148
 
         # Concatenate subject image and template image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
 
         # downsampling
-        down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1')  # 192x192x192
-        down1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='down1_2')          # 188x188x188
-        pool1 = MaxPooling3D(pool_size=(2, 2, 2), name='pool1')(down1)                                  # 94x94x94
+        down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1')  # 144x144x144
+        down1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='down1_2')          # 140x140x140
+        pool1 = MaxPooling3D(pool_size=(2, 2, 2), name='pool1')(down1)                                  # 70x70x70
 
-        down2 = conv3d(input_tensor=pool1, n_filters=2 * self.gf, padding='valid', name='down2_1')      # 90x90x90
-        down2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='down2_2')      # 86x86x86
-        pool2 = MaxPooling3D(pool_size=(2, 2, 2), name='pool2')(down2)                                  # 43x43x43
+        down2 = conv3d(input_tensor=pool1, n_filters=2 * self.gf, padding='valid', name='down2_1')      # 66x66x66
+        down2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='down2_2')      # 62x62x62
+        pool2 = MaxPooling3D(pool_size=(2, 2, 2), name='pool2')(down2)                                  # 31x31x31
 
-        center = conv3d(input_tensor=pool2, n_filters=4 * self.gf, padding='valid', name='center1')     # 39x39x39
-        center = conv3d(input_tensor=center, n_filters=4 * self.gf, padding='valid', name='center2')    # 35x35x35
+        center = conv3d(input_tensor=pool2, n_filters=4 * self.gf, padding='valid', name='center1')     # 27x27x27
+        center = conv3d(input_tensor=center, n_filters=4 * self.gf, padding='valid', name='center2')    # 23x23x23
 
         # upsampling with gap filling
         up2 = deconv3d(input_tensor=center, n_filters = 2*self.gf, padding='same', name='up2')          # 70x70x70
@@ -207,18 +214,18 @@ class GANUnetModel64():
         up2 = conv3d(input_tensor=up2, n_filters=2*self.gf, padding='valid', name='up2conv_1')          # 66x66x66
         up2 = conv3d(input_tensor=up2, n_filters=2*self.gf, padding='valid', name='up2conv_2')          # 62x62x62
 
-        up1 = deconv3d(input_tensor=up2, n_filters=self.gf, padding='same', name='up1')                 # 124x124x124
-        gap1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='gap1_1')            # 184x184x184
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_2')             # 180x180x180
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_3')             # 176x176x176
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_4')             # 172x172x172
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_5')             # 168x168x168
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_6')             # 164x164x164
-        up1 = concatenate([Cropping3D(20)(gap1), up1], name='up1concat')                                # 124x124x124
-        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 124x124x124
-        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 120x120x120
+        up1 = deconv3d(input_tensor=up2, n_filters=self.gf, padding='same', name='up1')                 # 76x76x76
+        gap1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='gap1_1')            # 136x136x136
+        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_2')             # 132x132x132
+        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_3')             # 128x128x128
+        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_4')             # 124x124x124
+        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_5')             # 120x120x120
+        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_6')             # 116x116x116
+        up1 = concatenate([Cropping3D(20)(gap1), up1], name='up1concat')                                # 76x76x76
+        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 72x72x72
+        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 68x68x68
 
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)                 # 116x116x116
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)   # 68x68x68
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -283,10 +290,10 @@ class GANUnetModel64():
                 d = BatchNormalization(momentum=0.8, name=name+'_bn')(d)
             return d
 
-        img_A =  Input(shape=self.input_shape_d, name='input_img_A')             # 116x116x116 warped_img or reference
-        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 196x196x196 template
+        img_A =  Input(shape=self.input_shape_d, name='input_img_A')            # 68x68x68 warped_img or reference
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 148x148x148 template
 
-        img_T_cropped = Cropping3D(cropping=40)(img_T)  # 196x196x196
+        img_T_cropped = Cropping3D(cropping=40)(img_T)  # 68x68x68
 
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1)([img_A, img_T_cropped])
@@ -296,10 +303,11 @@ class GANUnetModel64():
         d3 = d_layer(d2, self.df*4, name='d3')
         d4 = d_layer(d3, self.df*8, name='d4')
 
+        #d5 = d_layer(d4, self.df*16, name='d5')
        # d5 = Flatten()(d4)
        # validity = Dense(1, activation='sigmoid')(d5)
 
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='disc_sig')(d4) # 8x8x8
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='disc_sig')(d4) # 5x5x5
 
         return Model([img_A, img_T], validity, name='discriminator_model')
 
@@ -309,11 +317,11 @@ class GANUnetModel64():
     Deformable Transformation Layer    
     """
     def build_transformation(self):
-        img_S = Input(shape=self.input_shape_g, name='input_img_S_transform')  # 196x196x196
-        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 116x116x116
+        img_S = Input(shape=self.input_shape_g, name='input_img_S_transform')  # 148x148x148
+        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 68x68x68
 
-        img_S_cropped = Cropping3D(cropping=40)(img_S)  # 116x116x116
-        warped_S = Lambda(dense_image_warp_3D, output_shape=(116,116,116,1))([img_S_cropped, phi])
+        img_S_cropped = Cropping3D(cropping=40)(img_S)  # 68x68x68
+        warped_S = Lambda(dense_image_warp_3D, output_shape=(68,68,68,1))([img_S_cropped, phi])
 
         return Model([img_S, phi], warped_S,  name='transformation_layer')
 
@@ -357,8 +365,8 @@ class GANUnetModel64():
 
         # Adversarial loss ground truths
         disc_patch = self.output_shape_d_v2
-        input_sz = 196
-        output_sz = 116
+        input_sz = 148
+        output_sz = 68
         gap = int((input_sz - output_sz)/2)
 
         # hard labels
@@ -395,24 +403,26 @@ class GANUnetModel64():
                 #assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
-                # perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
-                # batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
+                perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
+                batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
-                # batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
+                batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
                 batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
-                batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
+                #batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
 
                 # take only (24,24,24) from the (64,64,64) size
                 batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
-                # batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
-                batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz, :]
+                batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
+                                                             0 + gap:0 + gap + output_sz,
+                                                             0 + gap:0 + gap + output_sz, :]
+
+                #batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
+                #                                            0 + gap:0 + gap + output_sz,
+                #                                            0 + gap:0 + gap + output_sz, :]
+
                 batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz, :]
@@ -425,10 +435,10 @@ class GANUnetModel64():
                 # Noisy and soft labels
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], validhard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
-                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], fakehard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
@@ -457,7 +467,7 @@ class GANUnetModel64():
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0 and epoch != 0 and epoch % 10 == 0:
+                if batch_i % sample_interval == 0 and epoch != 0 and epoch % 5 == 0:
                     self.sample_images(epoch, batch_i)
 
 
@@ -486,8 +496,8 @@ class GANUnetModel64():
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
         #predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
-        input_sz = (196, 196, 196)
-        step = (116, 116, 116)
+        input_sz =self.crop_size_g
+        step = (68, 68, 68)
 
         gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
         start_time = datetime.datetime.now()
