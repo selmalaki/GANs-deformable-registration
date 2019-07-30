@@ -58,14 +58,14 @@ class GANUnetModel64():
         self.df = 64
 
         # Train the discriminator faster than the generator
-        optimizerD = Adam(0.001, decay=0.00005) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
-        optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
+        optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
-        self.discriminator = self.build_discriminator_v2()
+        self.discriminator = self.build_discriminator()
         self.discriminator.summary()
         self.discriminator.compile(loss='binary_crossentropy',
                                     optimizer=optimizerD,
@@ -348,7 +348,7 @@ class GANUnetModel64():
     def train(self, epochs, batch_size=1, sample_interval=50):
 
         # Adversarial loss ground truths
-        disc_patch = self.output_shape_d_v2
+        disc_patch = self.output_shape_d
         input_sz = 64
         output_sz = 24
         gap = int((input_sz - output_sz)/2)

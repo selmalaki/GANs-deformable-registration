@@ -51,25 +51,25 @@ class GANUnetModel148():
         self.input_shape_g = self.crop_size_g + (self.channels,)
         self.input_shape_d = self.crop_size_d + (self.channels,)
         self.output_shape_g = (68, 68, 68) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
-        self.output_shape_d = (6, 6, 6) + (self.channels,)
+        self.output_shape_d = (17, 17, 17) + (self.channels,)
         self.output_shape_d_v2 = (5, 5, 5) + (self.channels,)
 
         self.batch_sz = 1 # for testing locally to avoid memory allocation
 
         # Number of filters in the first layer of G and D
-        self.gf = 16
-        self.df = 16
+        self.gf = 32
+        self.df = 32
 
-        optimizerD = Adam(0.001, decay=0.00005) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
-        optimizerG = Adam(0.001, decay=0.00005) # in the paper the decay after 50K iterations by 0.5
+        optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
 
         # Build the three networks
         self.generator = self.build_generator()
         self.generator.summary()
-        self.discriminator = self.build_discriminator_v2()
+        self.discriminator = self.build_discriminator()
         self.discriminator.summary()
         self.transformation = self.build_transformation()
         self.transformation.summary()
@@ -232,26 +232,26 @@ class GANUnetModel148():
             d = LeakyReLU(alpha=0.2, name=name + '_leakyrelu')(d)
             return d
 
-        img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
-        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 64x64x64 template
+        img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 148x148x148 warped_img or reference
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 68x68x68 template
 
-        img_T_cropped = Cropping3D(cropping=20)(img_T)  # 24x24x24
+        img_T_cropped = Cropping3D(cropping=40)(img_T)  # 24x24x24
 
         # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
 
-        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
-        d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 12x12x12
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 68x68x68
+        d2 = d_layer(d1, self.df*2, name='d2')                                  # 68x68x68
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 34x34x34
 
-        d3 = d_layer(pool, self.df*4, name='d3')                                # 12x12x12
-        d4 = d_layer(d3, self.df*8, name='d4')                                  # 12x12x12
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 6x6x6
+        d3 = d_layer(pool, self.df*4, name='d3')                                # 34x34x34
+        d4 = d_layer(d3, self.df*8, name='d4')                                  # 34x34x34
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 17x17x17
 
-        d5 = d_layer(pool, self.df*8, name='d5')                                # 6x6x6
+        d5 = d_layer(pool, self.df*8, name='d5')                                # 17x17x17
 
         # ToDo: Use FC layer at the end like specified in the paper
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #6x6x6
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #17x17x17
         #d6 = Conv3D(1, kernel_size=4, strides=1, padding='same', name='validity')(d5)  # 6x6x6
 
         #validity = Flatten(data_format='channels_last')(d6)
@@ -352,7 +352,7 @@ class GANUnetModel148():
     def train(self, epochs, batch_size=1, sample_interval=50):
 
         # Adversarial loss ground truths
-        disc_patch = self.output_shape_d_v2
+        disc_patch = self.output_shape_d
         input_sz = 148
         output_sz = 68
         gap = int((input_sz - output_sz)/2)
