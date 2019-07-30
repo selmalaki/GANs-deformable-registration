@@ -36,7 +36,7 @@ from helpers import dense_image_warp_3D, numerical_gradient_3D, make_parallel #T
 __author__ = 'elmalakis'
 
 
-class GANUnetModel64():
+class GANUnetModel148():
 
     def __init__(self):
 
@@ -68,13 +68,10 @@ class GANUnetModel64():
 
         # Build the three networks
         self.generator = self.build_generator()
-        #self.generator = make_parallel(self.generator, gpu_count=4)
         self.generator.summary()
         self.discriminator = self.build_discriminator_v2()
-        #self.discriminator  = make_parallel(self.discriminator, gpu_count=4)
         self.discriminator.summary()
         self.transformation = self.build_transformation()
-        #self.transformation = make_parallel(self.transformation, gpu_count=4)
         self.transformation.summary()
 
         # Compile the discriminator
@@ -85,7 +82,6 @@ class GANUnetModel64():
         # Build the generator
         img_S = Input(shape=self.input_shape_g) # subject image S
         img_T = Input(shape=self.input_shape_g) # template image T
-        #img_R = Input(shape=self.input_shape_d) # reference
 
         # By conditioning on T generate a warped transformation function of S
         phi = self.generator([img_S, img_T])
@@ -102,18 +98,10 @@ class GANUnetModel64():
 
         # Discriminators determines validity of translated images / condition pairs
         validity = self.discriminator([warped_S, img_T])
-        #valid = self.discriminator([img_R, img_T])
 
-        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
-        #self.combined = multi_gpu_model(self.combined, gpus=4)
         self.combined.summary()
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
-        #self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
-        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
-        #self.combined.compile(loss=[partial_gp_loss, 'mae'],
-        #                      loss_weights=[1, 100],
-        #                      optimizer=optimizerG)
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v196/'
@@ -126,7 +114,7 @@ class GANUnetModel64():
                                       min_max=False,
                                       restricted_mask=False,
                                       use_hist_equilized_data=False,
-                                      use_sharpen=True)
+                                      use_sharpen=False)
 
     """
     Generator Network
@@ -225,7 +213,7 @@ class GANUnetModel64():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 72x72x72
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 68x68x68
 
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)   # 68x68x68
+        phi = Conv3D(filters=3, kernel_size=(4, 4, 4), padding='same', use_bias=False, name='phi')(up1)   # 68x68x68
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -561,7 +549,7 @@ if __name__ == '__main__':
     #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
     #K.set_session(sess)
 
-    gan = GANUnetModel64()
+    gan = GANUnetModel148()
     gan.train(epochs=20000, batch_size=4, sample_interval=200)
 
 
