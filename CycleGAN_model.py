@@ -20,7 +20,7 @@ import datetime
 import nrrd
 import os
 
-from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
+#from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
 #from ImageRegistrationGANs.data_loader import DataLoader
 from data_loader import DataLoader   #To run on the cluster
 
@@ -37,17 +37,25 @@ class CycleGAN_model64():
         self.DEBUG = 1
 
         # Input shape
-        self.img_rows = 64
-        self.img_cols = 64
-        self.img_depth = 64
+        self.img_rows = 128
+        self.img_cols = 128
+        self.img_depth = 128
         self.channels = 1
-        self.img_shape = (self.img_rows, self.img_cols, self.img_depth, self.channels)
+        self.crop_size = (self.img_rows, self.img_cols, self.img_depth)
+
+        self.img_shape = self.crop_size + (self.channels,)
 
         # Configure data loader
         self.dataset_name = 'fly'
-        self.batch_sz = 16 # for testing locally to avoid memory allocation
-        self.data_loader = DataLoader(batch_sz=self.batch_sz, dataset_name='fly', use_hist_equilized_data=True)
-
+        self.batch_sz = 1 # for testing locally to avoid memory allocation
+        self.data_loader = DataLoader(batch_sz=self.batch_sz,
+                                      crop_size=self.crop_size,
+                                      dataset_name='fly',
+                                      min_max=False,
+                                      restricted_mask=False,
+                                      use_hist_equilized_data=False,
+                                      use_sharpen=False,
+                                      use_golden=False)
 
         # Calculate output shape of D (PatchGAN)
         patch = int(self.img_rows / 2**4)
@@ -61,7 +69,7 @@ class CycleGAN_model64():
         self.lambda_cycle = 10.0                    # Cycle-consistency loss
         self.lambda_id = 0.1 * self.lambda_cycle    # Identity loss
 
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(0.001, 0.5)
 
         # Build and compile the discriminators
         self.d_A = self.build_discriminator()
@@ -191,22 +199,25 @@ class CycleGAN_model64():
         fake = np.zeros((self.batch_sz,) + self.disc_patch)
 
         for epoch in range(epochs):
-            for batch_i, (imgs_A, imgs_B) in enumerate(self.data_loader.load_batch()):
+            for batch_i, (batch_img, batch_img_template, batch_img_golden) in enumerate(self.data_loader.load_batch()):
 
                 # ----------------------
                 #  Train Discriminators
                 # ----------------------
+                # Create a ref image by perturbing th subject image with the template image
+                # perturbation_factor_alpha = 0.1 if epoch > epochs / 2 else 0.2
+                # batch_ref = perturbation_factor_alpha * batch_img + (1 - perturbation_factor_alpha) * batch_img_template
 
                 # Translate images to opposite domain
-                fake_B = self.g_AB.predict(imgs_A)
-                fake_A = self.g_BA.predict(imgs_B)
+                fake_B = self.g_AB.predict(batch_img)
+                fake_A = self.g_BA.predict(batch_img_template)
 
                 # Train the discriminators (original images = real / translated = Fake)
-                dA_loss_real = self.d_A.train_on_batch(imgs_A, valid)
+                dA_loss_real = self.d_A.train_on_batch(batch_img, valid)
                 dA_loss_fake = self.d_A.train_on_batch(fake_A, fake)
                 dA_loss = 0.5 * np.add(dA_loss_real, dA_loss_fake)
 
-                dB_loss_real = self.d_B.train_on_batch(imgs_B, valid)
+                dB_loss_real = self.d_B.train_on_batch(batch_img_template, valid)
                 dB_loss_fake = self.d_B.train_on_batch(fake_B, fake)
                 dB_loss = 0.5 * np.add(dB_loss_real, dB_loss_fake)
 
@@ -219,10 +230,10 @@ class CycleGAN_model64():
                 # ------------------
 
                 # Train the generators
-                g_loss = self.combined.train_on_batch([imgs_A, imgs_B],
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template],
                                                         [valid, valid,
-                                                        imgs_A, imgs_B,
-                                                        imgs_A, imgs_B])
+                                                         batch_img, batch_img_template,
+                                                         batch_img, batch_img_template])
 
                 elapsed_time = datetime.datetime.now() - start_time
 
@@ -240,15 +251,15 @@ class CycleGAN_model64():
                 if self.DEBUG:
                     self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
-                    weight_grad_gen = self.get_weight_grad(self.combined, [imgs_A, imgs_B],
-                                                        [valid, valid,
-                                                        imgs_A, imgs_B,
-                                                        imgs_A, imgs_B])
+                    #weight_grad_gen = self.get_weight_grad(self.combined, [batch_img, batch_img_template],
+                    #                                    [valid, valid,
+                    #                                     batch_img, batch_img_template,
+                    #                                     batch_img, batch_img_template])
 
-                    weight_grad_disc = self.get_weight_grad(self.d_A, fake_A, fake)
+                    # weight_grad_disc = self.get_weight_grad(self.d_A, fake_A, fake)
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0:
+                if batch_i % sample_interval == 0 and epoch != 0 and epoch % 5 == 0:
                     self.sample_images(epoch, batch_i)
 
 
@@ -277,9 +288,9 @@ class CycleGAN_model64():
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         os.makedirs(path+'generated_cyclegan/' , exist_ok=True)
 
-        idx, img_S, img_S_mask = self.data_loader.load_data(is_validation=True)
+        idx, img_S = self.data_loader.load_data(is_validation=True)
         img_T = self.data_loader.img_template
-        img_T_mask = self.data_loader.mask_template
+        # img_T_mask = self.data_loader.mask_template
 
         #img_S = img_S * img_S_mask   # img_A
         #img_T = img_T * img_T_mask   # img_B
@@ -295,14 +306,14 @@ class CycleGAN_model64():
         # img_T_masked = np.ma.array(img_T, mask=img_T_mask)
         # img_T = (img_T - img_T_masked.mean()) / img_T_masked.std()
 
-        nrrd.write(path + "generated_cyclegan/originalS_%d_%d_%d" % (epoch, batch_i, idx), img_S)
-        nrrd.write(path + "generated_cyclegan/originalT_%d_%d" % (epoch, batch_i), img_T)
+        # nrrd.write(path + "generated_cyclegan/originalS_%d_%d_%d" % (epoch, batch_i, idx), img_S)
+        # nrrd.write(path + "generated_cyclegan/originalT_%d_%d" % (epoch, batch_i), img_T)
 
         predict_img = np.zeros(img_S.shape, dtype=img_S.dtype)
         predict_templ = np.zeros(img_T.shape, dtype=img_T.dtype)
 
-        input_sz = (64, 64, 64)
-        step = (24, 24, 24)
+        input_sz = self.crop_size
+        step = (32, 32, 32)
 
         start_time = datetime.datetime.now()
         for row in range(0, img_S.shape[0] - input_sz[0], step[0]):
@@ -339,7 +350,7 @@ class CycleGAN_model64():
         nrrd.write(path+"generated_cyclegan/S2T_%d_%d_%d" % (epoch, batch_i, idx), predict_img)
         nrrd.write(path + "generated_cyclegan/T2S_%d_%d_%d" % (epoch, batch_i, idx), predict_templ)
 
-        file_name = 'gan_network'
+        file_name = 'gan_network'+str(epoch)
         # save the whole network
         gan.combined.save(path+'generated_cyclegan/'+file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
