@@ -35,23 +35,15 @@ class GAN_pix2pix():
         self.DEBUG = 1
 
         # Input shape
-        self.img_rows = 128
-        self.img_cols = 128
-        self.img_vols = 128
+        self.img_rows = 256
+        self.img_cols = 256
+        self.img_vols = 256
         self.channels = 1
-        self.batch_sz = 4 # for testing locally to avoid memory allocation
+        self.batch_sz = 1 # for testing locally to avoid memory allocation
 
         self.crop_size = (self.img_rows, self.img_cols, self.img_vols)
 
         self.img_shape = self.crop_size + (self.channels,)
-
-        self.data_loader = DataLoader(batch_sz=self.batch_sz,
-                                      crop_size=self.crop_size,
-                                      dataset_name='fly',
-                                      min_max=False,
-                                      restricted_mask=False,
-                                      use_hist_equilized_data=False,
-                                      use_sharpen=False)
 
         # Calculate output shape of D (PatchGAN)
         patch = int(self.img_rows / 2 ** 4)
@@ -60,10 +52,10 @@ class GAN_pix2pix():
 
 
         # Number of filters in the first layer of G and D
-        self.gf = 64
-        self.df = 64
+        self.gf = 16
+        self.df = 16
 
-        optimizer = Adam(0.0002, 0.5)
+        optimizer = Adam(0.001, 0.5)
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -100,15 +92,30 @@ class GAN_pix2pix():
 
         self.combined = Model(inputs=[img_S, img_T], outputs=[validity, warped_S])
         self.combined.summary()
+        # self.combined.compile(loss=['mse', 'mae'],
+        #                       loss_weights=[1, 100],
+        #                       optimizer=optimizer)
+
         self.combined.compile(loss=['mse', 'mae'],
-                              loss_weights=[1, 100],
+                              loss_weights=[50, 50],
                               optimizer=optimizer)
+
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
+
+
+        self.data_loader = DataLoader(batch_sz=self.batch_sz,
+                                      crop_size=self.crop_size,
+                                      dataset_name='fly',
+                                      min_max=False,
+                                      restricted_mask=False,
+                                      use_hist_equilized_data=False,
+                                      use_sharpen=False,
+                                      use_golden=False)
 
     def build_generator(self):
         """U-Net Generator"""
@@ -155,7 +162,7 @@ class GAN_pix2pix():
         u6 = deconv2d(u5, d1, self.gf)       #64x64x64
 
         u7 = UpSampling3D(size=2)(u6)        #128x128x128 #the original architecture from the paper is a bit different
-        phi = Conv3D(filters=3, kernel_size=4, strides=1, padding='same', activation='tanh')(u7)
+        phi = Conv3D(filters=3, kernel_size=4, strides=1, padding='same')(u7)
 
         return  Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -181,7 +188,7 @@ class GAN_pix2pix():
         d3 = d_layer(d2, self.df*4)
         d4 = d_layer(d3, self.df*8)
 
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same',name='disc_sig')(d4) #original is linear activation no sigmoid
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', name='disc_sig')(d4) #original is linear activation no sigmoid
 
         return Model([img_A, img_B], validity, name='discriminator_model')
 
