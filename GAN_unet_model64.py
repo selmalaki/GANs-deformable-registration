@@ -77,12 +77,10 @@ class GANUnetModel64():
        # Build the deformable transformation layer
         self.transformation = self.build_transformation()
         self.transformation.summary()
-        #self.transformation.compile(optimizer=optimizerG, loss='binary_crossentropy')
 
         # Input images
         img_S = Input(shape=self.input_shape_g) # subject image S
         img_T = Input(shape=self.input_shape_g) # template image T
-        #img_R = Input(shape=self.input_shape_d) # reference
 
         # By conditioning on T generate a warped transformation function of S
         phi = self.generator([img_S, img_T])
@@ -96,23 +94,13 @@ class GANUnetModel64():
 
         # For the combined model we will only train the generator
         self.discriminator.trainable = False
-        #self.transformation.trainable = False
-        #self.generator.trainable = True
 
         # Discriminators determines validity of translated images / condition pairs
         validity = self.discriminator([warped_S, img_T])
-        #valid = self.discriminator([img_R, img_T])
 
-        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=validity)
         self.combined = Model(inputs=[img_S, img_T], outputs=validity)
         self.combined.summary()
-        #self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
-        self.combined.compile(loss='binary_crossentropy', optimizer=optimizerG)
-        #self.discriminator.trainable = True
-        #self.combined = Model(inputs=[img_S, img_T, img_R], outputs=[validity, warped_S])
-        #self.combined.compile(loss=[partial_gp_loss, 'mae'],
-        #                      loss_weights=[1, 100],
-        #                      optimizer=optimizerG)
+        self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v1_2/'
@@ -222,7 +210,7 @@ class GANUnetModel64():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 26x26x26
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), use_bias=False, name='phi', activation='tanh')(up1)                 # 24x24x24
+        phi = Conv3D(filters=3, kernel_size=(4, 4, 4), use_bias=False, padding='same', name='phi')(up1)                 # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -399,24 +387,24 @@ class GANUnetModel64():
                 #assert not np.any(np.isnan(transform))
 
                 # Create a ref image by perturbing th subject image with the template image
-                # perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
-                # batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
+                perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
+                batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template #64x64x64
 
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
-                # batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
+                batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
                 batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
-                batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
+                #batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
 
                 # take only (24,24,24) from the (64,64,64) size
                 batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
-                # batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
-                batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
+                batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
+                # batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz, :]
                 batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz, :]
@@ -429,10 +417,10 @@ class GANUnetModel64():
                 # Noisy and soft labels
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], validhard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
-                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], fakehard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
@@ -456,12 +444,11 @@ class GANUnetModel64():
                        elapsed_time))
 
                 if self.DEBUG:
-                    #self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
                     self.write_log(self.callback, ['g_loss'], [g_loss], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
                 # If at save interval => save generated image samples
-                if batch_i % sample_interval == 0 and epoch != 0:
+                if batch_i % sample_interval == 0 and epoch != 0 and epoch % 5 == 0:
                     self.sample_images(epoch, batch_i)
 
 
@@ -525,7 +512,7 @@ class GANUnetModel64():
         nrrd.write(path+"generated_v1_2/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
         # self.data_loader._write_nifti(path+"generated_v1_2/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
-        file_name = 'gan_network'
+        file_name = 'gan_network'+ str(epoch)
         # save the whole network
         gan.combined.save(path+ 'generated_v1_2/'+ file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
