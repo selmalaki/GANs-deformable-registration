@@ -313,7 +313,7 @@ class DataLoader():
         #mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
 
         # Use the sharpened version as a template
-        if sharpen:
+        if use_sharpen:
             img_template, templ_header =  nrrd.read(filepath + 'preprocessed_convexhull/JRC2018_lo_sharp.nrrd')
             img_template_diff, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/JRC2018_lo_sharp_diff.nrrd')
 
