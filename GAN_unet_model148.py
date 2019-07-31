@@ -472,7 +472,7 @@ class GANUnetModel148():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_v1_2/' , exist_ok=True)
+        os.makedirs(path+'generated_v196/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
