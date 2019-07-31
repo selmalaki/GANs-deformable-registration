@@ -210,9 +210,9 @@ class GAN_pix2pix():
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
-        output_sz = 128
-        input_sz = 128
-        gap = int((input_sz - output_sz)/2)
+        #output_sz = 128
+        #input_sz = 128
+        #gap = int((input_sz - output_sz)/2)
         # Adversarial loss ground truths
         valid = np.ones((self.batch_sz,) + self.output_shape_d)
         fake = np.zeros((self.batch_sz,) + self.output_shape_d)
