@@ -351,7 +351,7 @@ class DataLoader():
                 golden_imgs.append(g_img)
 
 
-        elif use_hist_equilized_data:
+        if use_hist_equilized_data:
             # histogram equalized template
             img_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/' +'JRC2018_lo_histogram_normalized.nrrd')
             #mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/' + 'JRC2018_lo_dilated_mask.nrrd')
