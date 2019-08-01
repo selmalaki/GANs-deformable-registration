@@ -4,7 +4,7 @@ from keras.callbacks import TensorBoard
 import keras.backend as K
 import tensorflow as tf
 
-from keras.layers import BatchNormalization
+from keras.layers import BatchNormalization, Activation
 from keras.layers import Input, Dropout, Concatenate, Cropping3D, Add
 from keras.layers.convolutional import UpSampling3D, Conv3D
 from keras.layers.advanced_activations import LeakyReLU
@@ -96,7 +96,7 @@ class GAN_pix2pix():
         self.combined.summary()
 
         self.combined.compile(loss=['mse', 'mae'],
-                              loss_weights=[60, 40],
+                              loss_weights=[1, 100],
                               optimizer=optimizer)
 
 
@@ -122,19 +122,20 @@ class GAN_pix2pix():
         def conv2d(layer_input, filters, f_size=4, bn=True):
             """Layers used during downsampling"""
             d = Conv3D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
-            d = LeakyReLU(alpha=0.2)(d)
             if bn:
                 d = BatchNormalization(momentum=0.8)(d)
+            d = LeakyReLU(alpha=0.2)(d)
             return d
 
         def deconv2d(layer_input, skip_input, filters, f_size=4, dropout_rate=0): # dropout is 50 ->change from the implementaion
             """Layers used during upsampling"""
             u = UpSampling3D(size=2)(layer_input)
-            u = Conv3D(filters, kernel_size=f_size, padding='same', activation='relu')(u) # remove the strides
+            u = Concatenate()([u, skip_input])
+            u = Conv3D(filters, kernel_size=f_size, padding='same')(u) # remove the strides
             if dropout_rate:
                 u = Dropout(dropout_rate)(u)
             u = BatchNormalization(momentum=0.8)(u)
-            u = Concatenate()([u, skip_input])
+            u = Activation('relu')(u)
             return u
 
 
@@ -172,9 +173,9 @@ class GAN_pix2pix():
         def d_layer(layer_input, filters, f_size=4, bn=True):
             """Discriminator layer"""
             d = Conv3D(filters, kernel_size=f_size, strides=2, padding='same')(layer_input)
-            d = LeakyReLU(alpha=0.2)(d)
             if bn:
                 d = BatchNormalization(momentum=0.8)(d)
+            d = LeakyReLU(alpha=0.2)(d)
             return d
 
         img_S = Input(shape=self.input_shape_d) #128 S
