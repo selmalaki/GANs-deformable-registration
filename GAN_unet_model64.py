@@ -5,7 +5,7 @@ import keras.backend as K
 import tensorflow as tf
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
-from keras.layers import Input, Concatenate, concatenate, Reshape
+from keras.layers import Input, Concatenate, concatenate, Reshape, Add
 #from keras.layers import Lambda
 from keras.layers.core import Flatten, Dense, Lambda
 
@@ -177,7 +177,9 @@ class GANUnetModel64():
         img_T = Input(shape=input_shape, name='input_img_T')                                            # 64x64x64
 
         # Concatenate subject image and template image by channels to produce input
-        combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
+        #combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
+        combined_imgs = Add(name='combine_imgs_g')([img_S,img_T])
+
 
         # downsampling
         down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1')  # 62x62x62
@@ -210,7 +212,7 @@ class GANUnetModel64():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 26x26x26
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 24x24x24
 
-        phi = Conv3D(filters=3, kernel_size=(4, 4, 4), use_bias=False, padding='same', name='phi')(up1)                 # 24x24x24
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), strides=1, use_bias=False, padding='same', name='phi')(up1)                 # 24x24x24
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -235,7 +237,8 @@ class GANUnetModel64():
         img_T_cropped = Cropping3D(cropping=20)(img_T)  # 24x24x24
 
         # Concatenate image and conditioning image by channels to produce input
-        combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
+        #combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
+        combined_imgs = Add(name='combine_imgs_d')([img_A, img_T_cropped])
 
         d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 24x24x24
         d2 = d_layer(d1, self.df*2, name='d2')                                  # 24x24x24
@@ -281,8 +284,8 @@ class GANUnetModel64():
         img_T_cropped = Cropping3D(cropping=20)(img_T)  # 24x24x24
 
         # Concatenate image and conditioning image by channels to produce input
-        combined_imgs = Concatenate(axis=-1)([img_A, img_T_cropped])
-
+        #combined_imgs = Concatenate(axis=-1)([img_A, img_T_cropped])
+        combined_imgs = Add(name='combine_imgs_d')([img_A, img_T_cropped])
         d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')
         d2 = d_layer(d1, self.df*2, name='d2')
         d3 = d_layer(d2, self.df*4, name='d3')
