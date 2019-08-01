@@ -13,7 +13,7 @@ from keras.layers.advanced_activations import LeakyReLU, ReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
 
 from keras.optimizers import Adam
-from keras.models import Model, Sequential
+from keras.models import Model, Sequential, load_model
 
 import matplotlib.pyplot as plt
 from functools import partial
@@ -103,15 +103,12 @@ class GANUnetModel64():
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v1_2/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
         self.data_loader = DataLoader(batch_sz=self.batch_sz,
-                                      dataset_name='fly',
-                                      min_max=False,
-                                      restricted_mask=False,
-                                      use_hist_equilized_data=False)
+                                      dataset_name='fly')
 
     """
     Generator Network
@@ -381,7 +378,6 @@ class GANUnetModel64():
                 # ---------------------
                 #assert not np.any(np.isnan(batch_img))
                 #assert not np.any(np.isnan(batch_img_template))
-
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
                 #assert not np.any(np.isnan(phi))
 
@@ -512,26 +508,26 @@ class GANUnetModel64():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_v1_2/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_ganunet/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
         # self.data_loader._write_nifti(path+"generated_v1_2/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'+ str(epoch)
         # save the whole network
-        gan.combined.save(path+ 'generated_v1_2/'+ file_name + '.whole.h5', overwrite=True)
+        gan.combined.save(path+ 'generated_ganunet/'+ file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(path+ 'generated_v1_2/'+file_name + '_arch.json', 'w') as json_file:
+        with open(path+ 'generated_ganunet/'+file_name + '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+ 'generated_v1_2/'+file_name + '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+ 'generated_ganunet/'+file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
         # save the generator network
-        gan.generator.save(path+ 'generated_v1_2/'+file_name + '.gen.h5', overwrite=True)
+        gan.generator.save(path+ 'generated_ganunet/'+file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(path+ 'generated_v1_2/'+file_name + '_gen_arch.json', 'w') as json_file:
+        with open(path+ 'generated_ganunet/'+file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+ 'generated_v1_2/'+file_name + '_gen_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+ 'generated_ganunet/'+file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
 
 
