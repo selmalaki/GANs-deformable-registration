@@ -1,3 +1,4 @@
+import os
 import nrrd
 import scipy
 import random
@@ -46,13 +47,20 @@ class DataLoader():
         self.use_sharpen = use_sharpen
 
         if dataset_name is 'fly':
-            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.golden_imgs, self.n_batches = self.prepare_fly_data(batch_sz, use_hist_equilized_data, min_max, restricted_mask, use_golden, use_sharpen)
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.golden_imgs, self.n_batches = self.prepare_fly_data(batch_sz,
+                                                                                                                                                                    use_hist_equilized_data,
+                                                                                                                                                                    min_max,
+                                                                                                                                                                    restricted_mask,
+                                                                                                                                                                    use_golden,
+                                                                                                                                                                    use_sharpen)
         elif dataset_name is 'fish':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
         elif dataset_name is 'toy':
             self.imgs, self.img_template, self.n_batches = self.prepare_toy_data(batch_sz)
         else:
             raise ValueError('Data of type %s is not available' % (dataset_name))
+
+
 
 
 
@@ -150,7 +158,13 @@ class DataLoader():
         return imgs, masks, img_template, mask_template, imgs_test, masks_test, n_batches
 
 
-    def prepare_fly_data(self, batch_sz, use_hist_equilized_data=False, min_max=False, restricted_mask=False, use_golden=False, use_sharpen=False):
+    def prepare_fly_data(self, batch_sz,
+                         use_hist_equilized_data=False,
+                         min_max=False,
+                         restricted_mask=False,
+                         use_golden=False,
+                         use_sharpen=False):
+
         self.batch_sz = batch_sz
         self.n_gpus = 1
         self.mask_sz = self.crop_sz
@@ -302,6 +316,9 @@ class DataLoader():
                       # filepath + 'preprocessed_convexhull/' +'20170301_31_B3_Scope_1_C1_down_result_sharp_diff.nrrd',
                       # filepath + 'preprocessed_convexhull/' +'20170301_31_B5_Scope_1_C1_down_result_sharp_diff.nrrd'
                    ]
+
+        segmented = filepath + 'generated_v1_2/train_segmented/'
+
         # Template Preparation
 
         # The original template
@@ -414,6 +431,8 @@ class DataLoader():
                     curr_img = (2 * (curr_img - np.min(img_masked)) / (np.max(img_masked) - np.min(img_masked))) - 1
 
                 imgs.append(curr_img)
+
+
         else:
             print('----- loading normal data files -----')
             for ipp in img_pp:
