@@ -15,10 +15,6 @@ from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
 from keras.optimizers import Adam
 from keras.models import Model, Sequential
 
-from keras.utils import multi_gpu_model
-
-
-import matplotlib.pyplot as plt
 from functools import partial
 import numpy as np
 import datetime
@@ -110,11 +106,8 @@ class GANUnetModel148():
 
         self.data_loader = DataLoader(batch_sz=self.batch_sz,
                                       crop_size=self.crop_size_g,
-                                      dataset_name='fly',
-                                      min_max=False,
-                                      restricted_mask=False,
-                                      use_hist_equilized_data=False,
-                                      use_sharpen=False)
+                                      dataset_name='fly')
+
 
     """
     Generator Network
@@ -174,10 +167,8 @@ class GANUnetModel148():
             layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
             return layer
 
-
-        input_shape = self.input_shape_g
-        img_S = Input(shape=input_shape, name='input_img_S')                                            # 148x148x148
-        img_T = Input(shape=input_shape, name='input_img_T')                                            # 148x148x148
+        img_S = Input(shape=self.input_shape_g, name='input_img_S')                                            # 148x148x148
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')                                            # 148x148x148
 
         # Concatenate subject image and template image by channels to produce input
         combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
@@ -213,7 +204,7 @@ class GANUnetModel148():
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 72x72x72
         up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 68x68x68
 
-        phi = Conv3D(filters=3, kernel_size=(4, 4, 4), padding='same', use_bias=False, name='phi')(up1)   # 68x68x68
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), padding='same', use_bias=False, name='phi')(up1)   # 68x68x68
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -382,7 +373,6 @@ class GANUnetModel148():
                 # ---------------------
                 #assert not np.any(np.isnan(batch_img))
                 #assert not np.any(np.isnan(batch_img_template))
-
                 phi = self.generator.predict([batch_img, batch_img_template]) #24x24x24
                 #assert not np.any(np.isnan(phi))
 
