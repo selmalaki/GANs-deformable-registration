@@ -102,7 +102,7 @@ class GAN_pix2pix():
 
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pixwithgolden/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
@@ -115,7 +115,7 @@ class GAN_pix2pix():
                                       restricted_mask=False,
                                       use_hist_equilized_data=False,
                                       use_sharpen=False,
-                                      use_golden=False)
+                                      use_golden=True)
 
     def build_generator(self):
         """U-Net Generator"""
@@ -209,7 +209,7 @@ class GAN_pix2pix():
     def train(self, epochs, batch_size=1, sample_interval=50):
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pixwithgolden/' , exist_ok=True)
         #output_sz = 128
         #input_sz = 128
         #gap = int((input_sz - output_sz)/2)
@@ -242,7 +242,7 @@ class GAN_pix2pix():
                 # Train the generator
 
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_ref]) # The original implemntation has batch_img in the output
-
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])  # The original implemntation has batch_img in the output
                 elapsed_time = datetime.datetime.now() - start_time
 
                 print(
@@ -278,7 +278,7 @@ class GAN_pix2pix():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pixwithgolden/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
@@ -315,25 +315,25 @@ class GAN_pix2pix():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_pix2pix/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_pix2pixwithgolden/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
 
         file_name = 'gan_network' +str(epoch)
         # save the whole network
-        gan.combined.save(path+'generated_pix2pix/'+file_name + '.whole.h5', overwrite=True)
+        gan.combined.save(path+'generated_pix2pixwithgolden/'+file_name + '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(path+'generated_pix2pix/'+file_name + '_arch.json', 'w') as json_file:
+        with open(path+'generated_pix2pixwithgolden/'+file_name + '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+'generated_pix2pix/'+file_name + '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_pix2pixwithgolden/'+file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
         # save the encoder network
-        gan.generator.save(path+'generated_pix2pix/'+file_name + '.gen.h5', overwrite=True)
+        gan.generator.save(path+'generated_pix2pixwithgolden/'+file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
         with open(path+'generated_pix2pix/'+file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+'generated_pix2pix/'+file_name + '_gen_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+'generated_pix2pixwithgolden/'+file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
 
 
