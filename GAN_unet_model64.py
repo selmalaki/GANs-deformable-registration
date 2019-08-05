@@ -22,12 +22,12 @@ import datetime
 import nrrd
 import os
 
-from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
-from ImageRegistrationGANs.data_loader import DataLoader
+#from ImageRegistrationGANs.helpers import dense_image_warp_3D, numerical_gradient_3D
+#from ImageRegistrationGANs.data_loader import DataLoader
 
 
-#from data_loader import DataLoader   #To run on the cluster'
-#from helpers import dense_image_warp_3D, numerical_gradient_3D #To run on the cluster'
+from data_loader import DataLoader   #To run on the cluster'
+from helpers import dense_image_warp_3D, numerical_gradient_3D #To run on the cluster'
 
 
 __author__ = 'elmalakis'
@@ -51,7 +51,7 @@ class GANUnetModel64():
         self.output_shape_d = (6, 6, 6) + (self.channels,)
         self.output_shape_d_v2 = (2, 2, 2) + (self.channels,)
 
-        self.batch_sz = 4 # for testing locally to avoid memory allocation
+        self.batch_sz = 1 # for testing locally to avoid memory allocation
 
         # Number of filters in the first layer of G and D
         self.gf = 64
@@ -104,11 +104,13 @@ class GANUnetModel64():
 
         if self.DEBUG:
             log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet/'
+            os.makedirs(log_path, exist_ok=True)
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
         self.data_loader = DataLoader(batch_sz=self.batch_sz,
-                                      dataset_name='fly')
+                                      dataset_name='fly',
+                                      use_golden=True)
 
     """
     Generator Network
@@ -319,12 +321,13 @@ class GANUnetModel64():
         """
         # when ytrue = 0 but the discriminator give ypred =1 then it should be a small loss for the generator case
         #if y_true == 0:
-        lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
+        #lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
         #else:
         #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
 
         #return lr
         #
+        lr = K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
         # compute the numerical gradient of phi
         gradients = numerical_gradient_3D(phi)
         # #if self.DEBUG: gradients = K.print_tensor(gradients, message='gradients are:')
@@ -392,7 +395,7 @@ class GANUnetModel64():
                 batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
                 batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
                 batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
-                #batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
+                batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
 
                 # take only (24,24,24) from the (64,64,64) size
                 batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
@@ -401,9 +404,9 @@ class GANUnetModel64():
                 batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz,
                                                             0 + gap:0 + gap + output_sz, :]
-                # batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
+                batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
+                                                            0 + gap:0 + gap + output_sz,
+                                                            0 + gap:0 + gap + output_sz, :]
                 batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz,
                                                                       0 + gap:0 + gap + output_sz, :]
@@ -414,16 +417,17 @@ class GANUnetModel64():
 
                 # Train the discriminator (R -> T is valid, S -> T is fake)
                 # Noisy and soft labels
+                self.discriminator.trainable = True
                 noisy_prob = 1 - np.sqrt(1 - np.random.random()) # peak near low values and falling off towards high values
                 if noisy_prob < 0.85: # occasionally flip labels to introduce noisy labels
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], validhard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], validhard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fakehard)
                 else:
-                    d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], fakehard)
+                    d_loss_real = self.discriminator.train_on_batch([batch_golden_sub, batch_img_template], fakehard)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], validhard)
 
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
-
+                self.discriminator.trainable = False
                 # ---------------------
                 #  Train Generator
                 # ---------------------
@@ -464,7 +468,7 @@ class GANUnetModel64():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_v1_2/' , exist_ok=True)
+        os.makedirs(path+'generated_ganunet/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
