@@ -518,8 +518,12 @@ class GANUnetModel64Cascade():
                                                      col:col + input_sz[1],
                                                      vol:vol + input_sz[2]]
 
-                    patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
-                    patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
+                    # Use segmentation unet
+                    phiseg = self.segmentation_model.predict([patch_sub_img, patch_templ_img])
+                    batch_img_seg = self.transformation_seg.predict([patch_sub_img, phiseg])  # 64x64x64
+
+                    patch_predict_phi = self.generator.predict([batch_img_seg, patch_templ_img])
+                    patch_predict_warped = self.transformation.predict([batch_img_seg, patch_predict_phi])
 
                     predict_img[row + gap[0]:row + gap[0] + step[0],
                                 col + gap[1]:col + gap[1] + step[1],
