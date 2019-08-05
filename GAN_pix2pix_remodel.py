@@ -45,17 +45,17 @@ class GAN_pix2pix():
 
         self.img_shape = self.crop_size + (self.channels,)
 
-        self.output_size = 128
-        self.output_shape_g = (self.output_size,self.output_size,self.output_size) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
-        self.input_shape_d = (self.output_size,self.output_size,self.output_size) + (1,)
+        self.output_size = 256
+        self.output_shape_g = self.crop_size + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
+        self.input_shape_d =  self.crop_size  + (1,)
 
         # Calculate output shape of D (PatchGAN)
         patch = int(self.output_size / 2 ** 4)
         self.output_shape_d = (patch, patch, patch,  self.channels)
 
         # Number of filters in the first layer of G and D
-        self.gf = 16
-        self.df = 16
+        self.gf = 32
+        self.df = 32
 
         optimizer = Adam(0.001, 0.5)
 
@@ -130,20 +130,21 @@ class GAN_pix2pix():
         def deconv2d(layer_input, skip_input, filters, f_size=4, dropout_rate=0): # dropout is 50 ->change from the implementaion
             """Layers used during upsampling"""
             u = UpSampling3D(size=2)(layer_input)
-            u = Concatenate()([u, skip_input])
+
             u = Conv3D(filters, kernel_size=f_size, padding='same')(u) # remove the strides
             if dropout_rate:
                 u = Dropout(dropout_rate)(u)
             u = BatchNormalization(momentum=0.8)(u)
             u = Activation('relu')(u)
+            u = Concatenate()([u, skip_input])
             return u
 
 
         img_S = Input(shape=self.img_shape, name='input_img_S')
         img_T = Input(shape=self.img_shape, name='input_img_T')
 
-        #d0 = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
-        d0= Add(name='combine_imgs_g')([img_S, img_T])  #256
+        d0 = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
+        #d0= Add(name='combine_imgs_g')([img_S, img_T])  #256
 
         # Downsampling
         d1 = conv2d(d0, self.gf, bn=False)   #128
@@ -162,8 +163,8 @@ class GAN_pix2pix():
         u5 = deconv2d(u4, d2, self.gf*2)     #64
         u6 = deconv2d(u5, d1, self.gf)       #128
 
-        #u7 = UpSampling3D(size=2)(u6)        #256 #the original architecture from the paper is a bit different
-        phi = Conv3D(filters=3, kernel_size=1, strides=1, padding='same')(u6) #128
+        u7 = UpSampling3D(size=2)(u6)        #256 #the original architecture from the paper is a bit different
+        phi = Conv3D(filters=3, kernel_size=1, strides=1, padding='same')(u7) #256
 
         return  Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -178,14 +179,14 @@ class GAN_pix2pix():
             d = LeakyReLU(alpha=0.2)(d)
             return d
 
-        img_S = Input(shape=self.input_shape_d) #128 S
+        img_S = Input(shape=self.img_shape) #256 S
         img_T = Input(shape=self.img_shape) #256 T
 
-        img_T_cropped = Cropping3D(cropping=64)(img_T)  # 128
+        #img_T_cropped = Cropping3D(cropping=64)(img_T)  # 128
 
         # Concatenate image and conditioning image by channels to produce input
-        #combined_imgs = Concatenate(axis=-1)([img_A, img_B])
-        combined_imgs = Add()([img_S, img_T_cropped])
+        combined_imgs = Concatenate(axis=-1)([img_S, img_T])
+        #combined_imgs = Add()([img_S, img_T])
 
         d1 = d_layer(combined_imgs, self.df, bn=False)
         d2 = d_layer(d1, self.df*2)
@@ -199,10 +200,11 @@ class GAN_pix2pix():
 
     def build_transformation(self):
         img_S = Input(shape=self.img_shape, name='input_img_S_transform')      # 256
-        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 128
+        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 256
 
-        img_S_cropped = Cropping3D(cropping=64)(img_S)  # 68x68x68
-        warped_S = Lambda(dense_image_warp_3D, output_shape=self.input_shape_d)([img_S_cropped, phi])
+        #img_S_cropped = Cropping3D(cropping=64)(img_S)  # 68x68x68
+
+        warped_S = Lambda(dense_image_warp_3D, output_shape=self.input_shape_d)([img_S, phi])
 
         return Model([img_S, phi], warped_S,  name='transformation_layer')
 
@@ -229,33 +231,36 @@ class GAN_pix2pix():
                 # ---------------------
                 # Condition on B and generate a translate
                 phi = self.generator.predict([batch_img, batch_img_template])
-                transform = self.transformation.predict([batch_img, phi])
+                transform = self.transformation.predict([batch_img, phi]) #256x256x256
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
 
-                batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
-                batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
-                batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
-                batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
+                # batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
+                # batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
+                # batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
+                # batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
 
                 # take only (128,128,128) from the (256,256,256) size
-                batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz, :]
-                batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz, :]
-                batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz,
-                                                            0 + gap:0 + gap + output_sz, :]
-                batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
-                                                                      0 + gap:0 + gap + output_sz,
-                                                                      0 + gap:0 + gap + output_sz, :]
+                # batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz, :]
+                # batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz, :]
+                # batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz,
+                #                                             0 + gap:0 + gap + output_sz, :]
+                # batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
+                #                                                       0 + gap:0 + gap + output_sz,
+                #                                                       0 + gap:0 + gap + output_sz, :]
 
 
                 # Train the discriminators (original images = real / generated = Fake)
-                d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], valid)
+                # d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], valid)
+                # d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
+
+                d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
                 d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
@@ -265,7 +270,8 @@ class GAN_pix2pix():
 
                 # Train the generator
 
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_golden_sub]) # The original implemntation has batch_img in the output
+                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_golden_sub]) # The original implemntation has batch_img in the output
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])  # The original implemntation has batch_img in the output
 
                 elapsed_time = datetime.datetime.now() - start_time
 
@@ -333,9 +339,14 @@ class GAN_pix2pix():
                     patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
                     patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
 
-                    predict_img[row + gap[0] :row + gap[0] + output_sz[0],
-                                col + gap[1] :col + gap[1] + output_sz[1],
-                                vol + gap[2] :vol + gap[2] + output_sz[2]] = patch_predict_warped[0, :, :, :, 0]
+                    # predict_img[row + gap[0] :row + gap[0] + output_sz[0],
+                    #             col + gap[1] :col + gap[1] + output_sz[1],
+                    #             vol + gap[2] :vol + gap[2] + output_sz[2]] = patch_predict_warped[0, :, :, :, 0]
+
+                    predict_img[row  :row + output_sz[0],
+                                col  :col + output_sz[1],
+                                vol  :vol + output_sz[2]] = patch_predict_warped[0, :, :, :, 0]
+
 
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
