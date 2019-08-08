@@ -9,7 +9,7 @@ from keras.layers import Input, Dropout, Concatenate, Cropping3D, Add
 from keras.layers.convolutional import UpSampling3D, Conv3D
 from keras.layers.advanced_activations import LeakyReLU
 from keras.layers.core import Lambda
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 from keras.models import Model
 from functools import partial
 import numpy as np
@@ -39,17 +39,16 @@ class GAN_pix2pix():
         self.img_cols = 256
         self.img_vols = 256
         self.channels = 1
-        self.batch_sz = 1 # for testing locally to avoid memory allocation
+        self.batch_sz = 1
 
         self.crop_size = (self.img_rows, self.img_cols, self.img_vols)
-
         self.img_shape = self.crop_size + (self.channels,)
 
         self.output_size = 256
         self.output_shape_g = self.crop_size + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
         self.input_shape_d =  self.crop_size  + (1,)
 
-        # Calculate output shape of D (PatchGAN)
+        # Calculate output shape of D
         patch = int(self.output_size / 2 ** 4)
         self.output_shape_d = (patch, patch, patch,  self.channels)
 
@@ -58,6 +57,8 @@ class GAN_pix2pix():
         self.df = 32
 
         optimizer = Adam(0.001, 0.5)
+        #optimizer = SGD(lr=0.001, decay=1e-6, momentum=0.9,
+        #                  nesterov=True)  # in the paper the learning rate is 0.001 and weight decay is 0.5
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -105,7 +106,7 @@ class GAN_pix2pix():
 
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix_remod_smooth/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix_remod_golden_smooth/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
@@ -167,7 +168,7 @@ class GAN_pix2pix():
         u5 = deconv2d(u4, d2, self.gf*2)     #64
         u6 = deconv2d(u5, d1, self.gf)       #128
 
-        u7 = UpSampling3D(size=2)(u6)        #256 #the original architecture from the paper is a bit different
+        u7 = UpSampling3D(size=2)(u6)        #256
         phi = Conv3D(filters=3, kernel_size=1, strides=1, padding='same')(u7) #256
 
         return  Model([img_S, img_T], outputs=phi, name='generator_model')
@@ -186,9 +187,6 @@ class GAN_pix2pix():
         img_S = Input(shape=self.img_shape) #256 S
         img_T = Input(shape=self.img_shape) #256 T
 
-        #img_T_cropped = Cropping3D(cropping=64)(img_T)  # 128
-
-        # Concatenate image and conditioning image by channels to produce input
         combined_imgs = Concatenate(axis=-1)([img_S, img_T])
         #combined_imgs = Add()([img_S, img_T])
 
@@ -203,10 +201,9 @@ class GAN_pix2pix():
 
 
     def build_transformation(self):
+
         img_S = Input(shape=self.img_shape, name='input_img_S_transform')      # 256
         phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 256
-
-        #img_S_cropped = Cropping3D(cropping=64)(img_S)  # 68x68x68
 
         warped_S = Lambda(dense_image_warp_3D, output_shape=self.input_shape_d)([img_S, phi])
 
@@ -232,12 +229,12 @@ class GAN_pix2pix():
         #   ... summing over the rows ...
         gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
         # #   ... and sqrt
-        # #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # # compute lambda * (1 - ||grad||)^2 still for each single sample
         # #gradient_penalty = K.square(1 - gradient_l2_norm)
         # # return the mean as loss over all the batch samples
-        # #return K.mean(gradient_l2_norm) + lr
-        return gradients_sqr_sum + mse_loss
+        #return K.mean(gradient_l2_norm) + mse_loss
+        return K.mean(gradients_sqr_sum) + mse_loss
     """
     Training
     """
@@ -251,6 +248,8 @@ class GAN_pix2pix():
         # Adversarial loss ground truths
         valid = np.ones((self.batch_sz,) + self.output_shape_d)
         fake = np.zeros((self.batch_sz,) + self.output_shape_d)
+        validsoft = np.random.uniform(low=0.7, high=1.2, size=(self.batch_sz,) + self.output_shape_d)
+        fakesoft = np.random.uniform(low=0.0, high=0.3, size=(self.batch_sz,) + self.output_shape_d)
 
         start_time = datetime.datetime.now()
         for epoch in range(epochs):
@@ -258,36 +257,12 @@ class GAN_pix2pix():
                 # ---------------------
                 #  Train Discriminator
                 # ---------------------
-                # Condition on B and generate a translate
+                # Condition on template and generate a transform
                 phi = self.generator.predict([batch_img, batch_img_template])
-                transform = self.transformation.predict([batch_img, phi]) #256x256x256
+                transform = self.transformation.predict([batch_img, phi])
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
-
-                # batch_img_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img.dtype)
-                # batch_ref_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_ref.dtype)
-                # batch_temp_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_template.dtype)
-                # batch_golden_sub = np.zeros((self.batch_sz, output_sz, output_sz, output_sz, self.channels), dtype=batch_img_golden.dtype)
-
-                # take only (128,128,128) from the (256,256,256) size
-                # batch_img_sub[:, :, :, :, :] = batch_img[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
-                # batch_ref_sub[:, :, :, :, :] = batch_ref[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
-                # batch_golden_sub[:, :, :, :, :] = batch_img_golden[:, 0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz,
-                #                                             0 + gap:0 + gap + output_sz, :]
-                # batch_temp_sub[:, :, :, :, :] = batch_img_template[:, 0 + gap:0 + gap + output_sz,
-                #                                                       0 + gap:0 + gap + output_sz,
-                #                                                       0 + gap:0 + gap + output_sz, :]
-
-
-                # Train the discriminators (original images = real / generated = Fake)
-                # d_loss_real = self.discriminator.train_on_batch([batch_ref_sub, batch_img_template], valid)
-                # d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
 
                 d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
                 d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
@@ -296,11 +271,7 @@ class GAN_pix2pix():
                 # -----------------
                 #  Train Generator
                 # -----------------
-
-                # Train the generator
-
-                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_golden_sub]) # The original implemntation has batch_img in the output
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])  # The original implemntation has batch_img in the output
+                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])
 
                 elapsed_time = datetime.datetime.now() - start_time
 
@@ -319,7 +290,6 @@ class GAN_pix2pix():
                     self.write_log(self.callback, ['g_loss'], [g_loss[0]], batch_i)
                     self.write_log(self.callback, ['d_loss'], [d_loss[0]], batch_i)
 
-                # If at save interval => save generated image samples
                 if batch_i % sample_interval == 0 and epoch != 0 and epoch % 5 == 0:
                     self.sample_images(epoch, batch_i)
 
@@ -337,16 +307,17 @@ class GAN_pix2pix():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_pix2pix_remod_smooth/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pix_remod_golden_smooth/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
+        predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
         input_sz = self.crop_size
         output_sz = (self.output_size, self.output_size, self.output_size)
-        step = (24, 24, 24)
+        step = (64, 64, 64)
 
         gap = (int((input_sz[0] - output_sz[0]) / 2), int((input_sz[1] - output_sz[1]) / 2), int((input_sz[2] - output_sz[2]) / 2))
         start_time = datetime.datetime.now()
@@ -368,47 +339,44 @@ class GAN_pix2pix():
                     patch_predict_phi = self.generator.predict([patch_sub_img, patch_templ_img])
                     patch_predict_warped = self.transformation.predict([patch_sub_img, patch_predict_phi])
 
-                    # predict_img[row + gap[0] :row + gap[0] + output_sz[0],
-                    #             col + gap[1] :col + gap[1] + output_sz[1],
-                    #             vol + gap[2] :vol + gap[2] + output_sz[2]] = patch_predict_warped[0, :, :, :, 0]
-
                     predict_img[row  :row + output_sz[0],
                                 col  :col + output_sz[1],
                                 vol  :vol + output_sz[2]] = patch_predict_warped[0, :, :, :, 0]
 
+                    predict_phi[row :row  + output_sz[0],
+                               col :col  + output_sz[1],
+                               vol :vol  + output_sz[2],:] = patch_predict_phi[0, :, :, :, :]
 
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_pix2pix_remod_smooth/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        nrrd.write(path+"generated_pix2pix_remod_golden_smooth/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        self.data_loader._write_nifti(path + "generated_pix2pix_remod_golden_smooth/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
-        file_name = 'gan_network' +str(epoch)
-        # save the whole network
-        gan.combined.save(path+'generated_pix2pix_remod_smooth/'+file_name + '.whole.h5', overwrite=True)
-        print('Save the whole network to disk as a .whole.h5 file')
-        model_jason = gan.combined.to_json()
-        with open(path+'generated_pix2pix_remod_smooth/'+file_name + '_arch.json', 'w') as json_file:
-            json_file.write(model_jason)
-        gan.combined.save_weights(path+'generated_pix2pix_remod_smooth/'+file_name + '_weights.h5', overwrite=True)
-        print('Save the network architecture in .json file and weights in .h5 file')
+        if epoch%10 == 0:
+            file_name = 'gan_network' +str(epoch)
+            # save the whole network
+            gan.combined.save(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '.whole.h5', overwrite=True)
+            print('Save the whole network to disk as a .whole.h5 file')
+            model_jason = gan.combined.to_json()
+            with open(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '_arch.json', 'w') as json_file:
+                json_file.write(model_jason)
+            gan.combined.save_weights(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '_weights.h5', overwrite=True)
+            print('Save the network architecture in .json file and weights in .h5 file')
 
-        # save the encoder network
-        gan.generator.save(path+'generated_pix2pix_remod_smooth/'+file_name + '.gen.h5', overwrite=True)
-        print('Save the generator network to disk as a .whole.h5 file')
-        model_jason = gan.combined.to_json()
-        with open(path+'generated_pix2pix_remod_smooth/'+file_name + '_gen_arch.json', 'w') as json_file:
-            json_file.write(model_jason)
-        gan.combined.save_weights(path+'generated_pix2pix_remod_smooth/'+file_name + '_gen_weights.h5', overwrite=True)
-        print('Save the generator architecture in .json file and weights in .h5 file')
+            # # save the generator network
+            # gan.generator.save(path+'generated_pix2pix_remod_smooth/'+file_name + '.gen.h5', overwrite=True)
+            # print('Save the generator network to disk as a .whole.h5 file')
+            # model_jason = gan.generator.to_json()
+            # with open(path+'generated_pix2pix_remod_smooth/'+file_name + '_gen_arch.json', 'w') as json_file:
+            #     json_file.write(model_jason)
+            # gan.generator.save_weights(path+'generated_pix2pix_remod_smooth/'+file_name + '_gen_weights.h5', overwrite=True)
+            # print('Save the generator architecture in .json file and weights in .h5 file')
 
 
 if __name__ == '__main__':
     # Use GPU
     K.tensorflow_backend._get_available_gpus()
-    # launch tf debugger
-    #sess = K.get_session()
-    #sess = tf_debug.LocalCLIDebugWrapperSession(sess)
-    #K.set_session(sess)
 
     gan = GAN_pix2pix()
     gan.train(epochs=20000, batch_size=1, sample_interval=200)

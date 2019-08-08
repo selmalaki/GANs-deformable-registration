@@ -5,14 +5,14 @@ import keras.backend as K
 import tensorflow as tf
 
 from keras.layers import BatchNormalization, Activation, MaxPooling3D, Cropping3D
-from keras.layers import Input, Concatenate, concatenate, Reshape
+from keras.layers import Input, Concatenate, concatenate, Reshape, Add
 #from keras.layers import Lambda
 from keras.layers.core import Flatten, Dense, Lambda
 
 from keras.layers.advanced_activations import LeakyReLU, ReLU
 from keras.layers.convolutional import UpSampling3D, Conv3D, Conv3DTranspose
 
-from keras.optimizers import Adam
+from keras.optimizers import Adam, SGD
 from keras.models import Model, Sequential
 
 from functools import partial
@@ -41,14 +41,16 @@ class GANUnetModel148():
         self.DEBUG = 1
 
         self.crop_size_g = (148, 148, 148)
-        self.crop_size_d = (68, 68, 68)
+        self.crop_size_d = (60, 60, 60)
 
         self.channels = 1
+
         self.input_shape_g = self.crop_size_g + (self.channels,)
         self.input_shape_d = self.crop_size_d + (self.channels,)
-        self.output_shape_g = (68, 68, 68) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
-        self.output_shape_d = (17, 17, 17) + (self.channels,)
-        self.output_shape_d_v2 = (5, 5, 5) + (self.channels,)
+
+        self.output_shape_g = (60, 60, 60) + (3,)  # phi has three outputs. one for each X, Y, and Z dimensions
+        self.output_shape_d = (15, 15, 15) + (self.channels,)
+        #self.output_shape_d_v2 = (5, 5, 5) + (self.channels,)
 
         self.batch_sz = 1 # for testing locally to avoid memory allocation
 
@@ -56,12 +58,13 @@ class GANUnetModel148():
         self.gf = 32
         self.df = 32
 
-        optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        #optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
-        optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
-
+        #optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
+        optimizerG = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
         # Build the three networks
         self.generator = self.build_generator()
         self.generator.summary()
@@ -100,7 +103,7 @@ class GANUnetModel148():
         self.combined.compile(loss = partial_gp_loss, optimizer=optimizerG)
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v196/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganunet_v148/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
@@ -116,7 +119,7 @@ class GANUnetModel148():
         """U-Net Generator"""
         def conv3d(input_tensor,
                         n_filters,
-                        kernel_size=(5, 5, 5),
+                        kernel_size=(3, 3, 3),
                         batch_normalization=True,
                         scale=True,
                         padding='valid',
@@ -142,7 +145,7 @@ class GANUnetModel148():
 
         def deconv3d(input_tensor,
                         n_filters,
-                        kernel_size=(5, 5, 5),
+                        kernel_size=(3, 3, 3),
                         batch_normalization=True,
                         scale=True,
                         padding='valid',
@@ -157,10 +160,6 @@ class GANUnetModel148():
                            padding=padding,
                            use_bias=use_bias,
                            name=name + '_conv3d')(layer)
-            # if batch_normalization:
-            #     layer = BatchNormalization(name=name+'_bn')(layer)
-            #layer = Activation('relu', name=name+'_actrelu')(layer)
-
             # BN before activation
             if batch_normalization:
                 layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
@@ -171,40 +170,53 @@ class GANUnetModel148():
         img_T = Input(shape=self.input_shape_g, name='input_img_T')                                            # 148x148x148
 
         # Concatenate subject image and template image by channels to produce input
-        combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
+        #combined_imgs = Concatenate(axis=-1, name='combine_imgs_g')([img_S, img_T])
+        combined_imgs = Add(name='combine_imgs_g')([img_S, img_T])
+
 
         # downsampling
-        down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1')  # 144x144x144
-        down1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='down1_2')          # 140x140x140
-        pool1 = MaxPooling3D(pool_size=(2, 2, 2), name='pool1')(down1)                                  # 70x70x70
+        down1 = conv3d(input_tensor=combined_imgs, n_filters=self.gf, padding='valid', name='down1_1') #146
+        down1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='down1_2')         #144
+        pool1 = MaxPooling3D(pool_size=(2, 2, 2), name='pool1')(down1)                                 #72
 
-        down2 = conv3d(input_tensor=pool1, n_filters=2 * self.gf, padding='valid', name='down2_1')      # 66x66x66
-        down2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='down2_2')      # 62x62x62
-        pool2 = MaxPooling3D(pool_size=(2, 2, 2), name='pool2')(down2)                                  # 31x31x31
+        down2 = conv3d(input_tensor=pool1, n_filters=2 * self.gf, padding='valid', name='down2_1')     #70
+        down2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='down2_2')     #68
+        pool2 = MaxPooling3D(pool_size=(2, 2, 2), name='pool2')(down2)                                 #34
 
-        center = conv3d(input_tensor=pool2, n_filters=4 * self.gf, padding='valid', name='center1')     # 27x27x27
-        center = conv3d(input_tensor=center, n_filters=4 * self.gf, padding='valid', name='center2')    # 23x23x23
+        down3 = conv3d(input_tensor=pool2, n_filters=4 * self.gf, padding='valid', name='down3_1')     #32
+        down3 = conv3d(input_tensor=down3, n_filters=4 * self.gf, padding='valid', name='down3_2')     #30
+        pool3 = MaxPooling3D(pool_size=(2, 2, 2), name='pool3')(down3)                                 #15
+
+        center = conv3d(input_tensor=pool3, n_filters=8 * self.gf, padding='valid', name='center1')    #13
+        center = conv3d(input_tensor=center, n_filters=8 * self.gf, padding='valid', name='center2')   #11
 
         # upsampling with gap filling
-        up2 = deconv3d(input_tensor=center, n_filters = 2*self.gf, padding='same', name='up2')          # 70x70x70
-        gap2 = conv3d(input_tensor=down2, n_filters=2*self.gf, padding='valid', name='gap2_1')          # 82x82x82
-        gap2 = conv3d(input_tensor=gap2, n_filters=2*self.gf, padding='valid', name='gap2_2')           # 74x74x74
-        up2 = concatenate([Cropping3D(4)(gap2), up2], name='up2concat')                                 # 70x70x70
-        up2 = conv3d(input_tensor=up2, n_filters=2*self.gf, padding='valid', name='up2conv_1')          # 66x66x66
-        up2 = conv3d(input_tensor=up2, n_filters=2*self.gf, padding='valid', name='up2conv_2')          # 62x62x62
+        up3 = deconv3d(input_tensor=center, n_filters = 4*self.gf, padding='same', name='up3')         #22
+        gap3 = conv3d(input_tensor=down3, n_filters=4*self.gf, padding='valid', name='gap3_1')         #28
+        gap3 = conv3d(input_tensor=gap3, n_filters=4*self.gf, padding='valid', name='gap3_2')          #26
+        up3 = concatenate([Cropping3D(2)(gap3), up3], name='up3concat')                                #22
+        up3 = conv3d(input_tensor=up3, n_filters=4*self.gf, padding='valid', name='up3conv_1')         #20
+        up3 = conv3d(input_tensor=up3, n_filters=4*self.gf, padding='valid', name='up3conv_2')         #18
 
-        up1 = deconv3d(input_tensor=up2, n_filters=self.gf, padding='same', name='up1')                 # 76x76x76
-        gap1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='gap1_1')            # 136x136x136
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_2')             # 132x132x132
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_3')             # 128x128x128
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_4')             # 124x124x124
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_5')             # 120x120x120
-        gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_6')             # 116x116x116
-        up1 = concatenate([Cropping3D(20)(gap1), up1], name='up1concat')                                # 76x76x76
-        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')            # 72x72x72
-        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')            # 68x68x68
+        up2 = deconv3d(input_tensor=up3, n_filters=2 * self.gf, padding='same', name='up2')            #36
+        gap2 = conv3d(input_tensor=down2, n_filters=2 * self.gf, padding='valid', name='gap2_1')       #66
+        for i in range(2, 7):
+            gap2 = conv3d(input_tensor=gap2, n_filters=2 * self.gf, padding='valid', name='gap2_'+str(i))        #56
 
-        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), padding='same', use_bias=False, name='phi')(up1)   # 68x68x68
+        up2 = concatenate([Cropping3D(10)(gap2), up2], name='up2concat')                               #36
+        up2 = conv3d(input_tensor=up2, n_filters=2 * self.gf, padding='valid', name='up2conv_1')       #34
+        up2 = conv3d(input_tensor=up2, n_filters=2 * self.gf, padding='valid', name='up2conv_2')       #32
+
+
+        up1 = deconv3d(input_tensor=up2, n_filters=self.gf, padding='same', name='up1')                #64
+        gap1 = conv3d(input_tensor=down1, n_filters=self.gf, padding='valid', name='gap1_1')           #142
+        for i in range(2,21):
+            gap1 = conv3d(input_tensor=gap1, n_filters=self.gf, padding='valid', name='gap1_'+str(i))          #104
+        up1 = concatenate([Cropping3D(20)(gap1), up1], name='up1concat')                               #64
+        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_1')           #62
+        up1 = conv3d(input_tensor=up1, n_filters=self.gf, padding='valid', name='up1conv_2')           #60
+
+        phi = Conv3D(filters=3, kernel_size=(1, 1, 1), padding='same', use_bias=False, name='phi')(up1) #60
 
         model = Model([img_S, img_T], outputs=phi, name='generator_model')
 
@@ -223,26 +235,26 @@ class GANUnetModel148():
             d = LeakyReLU(alpha=0.2, name=name + '_leakyrelu')(d)
             return d
 
-        img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 148x148x148 warped_img or reference
-        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 68x68x68 template
+        img_S = Input(shape=self.input_shape_d, name='input_img_A')             # 60 warped_img or reference
+        img_T = Input(shape=self.input_shape_g, name='input_img_T')             # 148 template
 
-        img_T_cropped = Cropping3D(cropping=40)(img_T)  # 24x24x24
+        img_T_cropped = Cropping3D(cropping=44)(img_T)                          # 60
 
         # Concatenate image and conditioning image by channels to produce input
-        combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_A, img_T_cropped])
+        #combined_imgs = Concatenate(axis=-1, name='combine_imgs_d')([img_S, img_T_cropped])
+        combined_imgs = Add(name='combine_imgs_d')([img_S, img_T_cropped])
+        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 60
+        d2 = d_layer(d1, self.df*2, name='d2')                                  # 60
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 30
 
-        d1 = d_layer(combined_imgs, self.df, bn=False, name='d1')               # 68x68x68
-        d2 = d_layer(d1, self.df*2, name='d2')                                  # 68x68x68
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d2_pool')(d2)            # 34x34x34
+        d3 = d_layer(pool, self.df*4, name='d3')                                # 30
+        d4 = d_layer(d3, self.df*8, name='d4')                                  # 30
+        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 15
 
-        d3 = d_layer(pool, self.df*4, name='d3')                                # 34x34x34
-        d4 = d_layer(d3, self.df*8, name='d4')                                  # 34x34x34
-        pool = MaxPooling3D(pool_size=(2, 2, 2), name='d4_pool')(d4)            # 17x17x17
-
-        d5 = d_layer(pool, self.df*8, name='d5')                                # 17x17x17
+        d5 = d_layer(pool, self.df*8, name='d5')                                # 15
 
         # ToDo: Use FC layer at the end like specified in the paper
-        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #17x17x17
+        validity = Conv3D(1, kernel_size=4, strides=1, padding='same', activation='sigmoid', name='validity')(d5) #9
         #d6 = Conv3D(1, kernel_size=4, strides=1, padding='same', name='validity')(d5)  # 6x6x6
 
         #validity = Flatten(data_format='channels_last')(d6)
@@ -253,7 +265,7 @@ class GANUnetModel148():
         #d6 = Flatten(input_shape=(self.batch_sz,) + (6,6,6,512))(d5)
         #validity = Dense(1, activation='sigmoid')(d5)
 
-        return Model([img_A, img_T], validity, name='discriminator_model')
+        return Model([img_S, img_T], validity, name='discriminator_model')
 
 
     """
@@ -296,11 +308,11 @@ class GANUnetModel148():
     Deformable Transformation Layer    
     """
     def build_transformation(self):
-        img_S = Input(shape=self.input_shape_g, name='input_img_S_transform')  # 148x148x148
-        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 68x68x68
+        img_S = Input(shape=self.input_shape_g, name='input_img_S_transform')  # 148
+        phi = Input(shape=self.output_shape_g, name='input_phi_transform')     # 60
 
-        img_S_cropped = Cropping3D(cropping=40)(img_S)  # 68x68x68
-        warped_S = Lambda(dense_image_warp_3D, output_shape=(68,68,68,1))([img_S_cropped, phi])
+        img_S_cropped = Cropping3D(cropping=44)(img_S)  # 60
+        warped_S = Lambda(dense_image_warp_3D, output_shape=(60,60,60,1))([img_S_cropped, phi])
 
         return Model([img_S, phi], warped_S,  name='transformation_layer')
 
@@ -312,14 +324,7 @@ class GANUnetModel148():
         """
         Computes gradient penalty on phi to ensure smoothness
         """
-        # when ytrue = 0 but the discriminator give ypred =1 then it should be a small loss for the generator case
-        #if y_true == 0:
-        lr = -K.log(K.maximum(y_pred, 1e-15) ) #ensure numerical stability avoid log 0 # negative sign because the loss should be a positive value
-        #else:
-        #    lr = 0  # no loss in the other case because the y_true in all the generation case should be 0
-
-        #return lr
-        #
+        lr = K.mean(K.binary_crossentropy(y_true, y_pred), axis=-1)
         # compute the numerical gradient of phi
         gradients = numerical_gradient_3D(phi)
         # #if self.DEBUG: gradients = K.print_tensor(gradients, message='gradients are:')
@@ -329,12 +334,12 @@ class GANUnetModel148():
         #   ... summing over the rows ...
         gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
         # #   ... and sqrt
-        # #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # # compute lambda * (1 - ||grad||)^2 still for each single sample
         # #gradient_penalty = K.square(1 - gradient_l2_norm)
         # # return the mean as loss over all the batch samples
-        # #return K.mean(gradient_l2_norm) + lr
-        return gradients_sqr_sum + lr
+        return K.mean(gradient_l2_norm) + lr
+       # return gradients_sqr_sum + lr
 
 
     """
@@ -345,7 +350,7 @@ class GANUnetModel148():
         # Adversarial loss ground truths
         disc_patch = self.output_shape_d
         input_sz = 148
-        output_sz = 68
+        output_sz = 60
         gap = int((input_sz - output_sz)/2)
 
         # hard labels
@@ -462,7 +467,7 @@ class GANUnetModel148():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_v196/' , exist_ok=True)
+        os.makedirs(path+'generated_v148/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
@@ -472,10 +477,10 @@ class GANUnetModel148():
         # imgs_S = imgs_S * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
-        #predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
+        predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
         input_sz =self.crop_size_g
-        step = (68, 68, 68)
+        step = (60, 60, 60)
 
         gap = (int((input_sz[0] - step[0]) / 2), int((input_sz[1] - step[1]) / 2), int((input_sz[2] - step[2]) / 2))
         start_time = datetime.datetime.now()
@@ -498,35 +503,35 @@ class GANUnetModel148():
                     predict_img[row + gap[0]:row + gap[0] + step[0],
                                 col + gap[1]:col + gap[1] + step[1],
                                 vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
-                    # predict_phi[row + gap[0]:row + gap[0] + step[0],
-                    #            col + gap[1]:col + gap[1] + step[1],
-                    #            vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
+                    predict_phi[row + gap[0]:row + gap[0] + step[0],
+                               col + gap[1]:col + gap[1] + step[1],
+                               vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
 
-                    # predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
+
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_v196/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
-        # self.data_loader._write_nifti(path+"generated_v1_2/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
+        nrrd.write(path+"generated_v148/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        self.data_loader._write_nifti(path+"generated_v148/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'
         # save the whole network
-        gan.combined.save(path+ 'generated_v196/'+ file_name +str(epoch)+ '.whole.h5', overwrite=True)
+        gan.combined.save(path+ 'generated_v148/'+ file_name +str(epoch)+ '.whole.h5', overwrite=True)
         print('Save the whole network to disk as a .whole.h5 file')
         model_jason = gan.combined.to_json()
-        with open(path+ 'generated_v196/'+file_name +str(epoch)+ '_arch.json', 'w') as json_file:
+        with open(path+ 'generated_v148/'+file_name +str(epoch)+ '_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+ 'generated_v196/'+file_name +str(epoch)+ '_weights.h5', overwrite=True)
+        gan.combined.save_weights(path+ 'generated_v148/'+file_name +str(epoch)+ '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
-        # save the generator network
-        gan.generator.save(path+ 'generated_v196/'+file_name +str(epoch)+ '.gen.h5', overwrite=True)
-        print('Save the generator network to disk as a .whole.h5 file')
-        model_jason = gan.combined.to_json()
-        with open(path+ 'generated_v196/'+file_name +str(epoch)+ '_gen_arch.json', 'w') as json_file:
-            json_file.write(model_jason)
-        gan.combined.save_weights(path+ 'generated_v196/'+file_name +str(epoch)+ '_gen_weights.h5', overwrite=True)
-        print('Save the generator architecture in .json file and weights in .h5 file')
+        # # save the generator network
+        # gan.generator.save(path+ 'generated_v148/'+file_name +str(epoch)+ '.gen.h5', overwrite=True)
+        # print('Save the generator network to disk as a .whole.h5 file')
+        # model_jason = gan.generator.to_json()
+        # with open(path+ 'generated_v148/'+file_name +str(epoch)+ '_gen_arch.json', 'w') as json_file:
+        #     json_file.write(model_jason)
+        # gan.generator.save_weights(path+ 'generated_v148/'+file_name +str(epoch)+ '_gen_weights.h5', overwrite=True)
+        # print('Save the generator architecture in .json file and weights in .h5 file')
 
 
 if __name__ == '__main__':

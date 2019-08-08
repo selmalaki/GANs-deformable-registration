@@ -363,10 +363,10 @@ class CycleGAN_model64():
         # save the generator network the translation one
         gan.g_AB.save(path+'generated_cyclegan/' + file_name + '.gen.h5', overwrite=True)
         print('Save the generator network to disk as a .whole.h5 file')
-        model_jason = gan.combined.to_json()
+        model_jason = gan.generator.to_json()
         with open(path+'generated_cyclegan/' + file_name + '_gen_arch.json', 'w') as json_file:
             json_file.write(model_jason)
-        gan.combined.save_weights(path+'generated_cyclegan/' + file_name + '_gen_weights.h5', overwrite=True)
+        gan.generator.save_weights(path+'generated_cyclegan/' + file_name + '_gen_weights.h5', overwrite=True)
         print('Save the generator architecture in .json file and weights in .h5 file')
 
 
