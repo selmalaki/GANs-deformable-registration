@@ -58,13 +58,13 @@ class GANUnetModel148():
         self.gf = 32
         self.df = 32
 
-        #optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
-        optimizerD = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
+        optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        #optimizerD = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
-        #optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
-        optimizerG = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
+        optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
+        #optimizerG = SGD(lr=0.001, decay=1e-6, momentum=0.9, nesterov=True)
         # Build the three networks
         self.generator = self.build_generator()
         self.generator.summary()
