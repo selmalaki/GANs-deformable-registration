@@ -56,9 +56,10 @@ class GAN_pix2pix():
         self.gf = 32
         self.df = 32
 
-        optimizer = Adam(0.001, 0.5)
+        #optimizer = Adam(0.001, 0.5)
         #optimizer = SGD(lr=0.001, decay=1e-6, momentum=0.9,
-        #                  nesterov=True)  # in the paper the learning rate is 0.001 and weight decay is 0.5
+        #                  nesterov=True)
+        optimizer = Adam(0.0002, 0.5)
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -229,12 +230,13 @@ class GAN_pix2pix():
         #   ... summing over the rows ...
         gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
         # #   ... and sqrt
-        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # # compute lambda * (1 - ||grad||)^2 still for each single sample
-        # #gradient_penalty = K.square(1 - gradient_l2_norm)
+        #gradient_penalty = K.square(1 - gradient_l2_norm)
         # # return the mean as loss over all the batch samples
-        #return K.mean(gradient_l2_norm) + mse_loss
-        return K.mean(gradients_sqr_sum) + mse_loss
+        return K.mean(gradient_l2_norm) + mse_loss
+        #return K.mean(gradients_sqr_sum) + mse_loss
+        #return K.mean(gradient_penalty) + mse_loss
     """
     Training
     """
@@ -263,9 +265,18 @@ class GAN_pix2pix():
                 # Create a ref image by perturbing th subject image with the template image
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
+                # use noisy targets to get the GAN out of any local minima (mode collapse)
+                noisy_prob = 1 - np.sqrt(
+                    1 - np.random.random())  # peak near low values and falling off towards high values
+                if noisy_prob < 0.85:  # occasionally flip labels to introduce noisy labels
+                    d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
+                else:
+                    d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], fake)
+                    d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], valid)
 
-                d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
-                d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
+                # d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
+                # d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
                 d_loss = 0.5 * np.add(d_loss_real, d_loss_fake)
 
                 # -----------------
