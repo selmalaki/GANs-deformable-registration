@@ -58,11 +58,11 @@ class GANUnetModel64():
         self.df = 64
 
         # Train the discriminator faster than the generator
-        optimizerD = Adam(0.001, decay=0.05) # in the paper the learning rate is 0.001 and weight decay is 0.5
+        optimizerD = Adam(0.001, decay=0.5) # in the paper the learning rate is 0.001 and weight decay is 0.5
         self.decay = 0.5
         self.iterations_decay = 50
         self.learning_rate = 0.001
-        optimizerG = Adam(0.001, decay=0.05) # in the paper the decay after 50K iterations by 0.5
+        optimizerG = Adam(0.001, decay=0.5) # in the paper the decay after 50K iterations by 0.5
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -139,7 +139,7 @@ class GANUnetModel64():
             # Add BN after activation
             if batch_normalization:
                 layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
-            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
+            layer = Activation('relu', name=name + '_relu')(layer)
             return layer
 
 
@@ -160,14 +160,11 @@ class GANUnetModel64():
                            padding=padding,
                            use_bias=use_bias,
                            name=name + '_conv3d')(layer)
-            # if batch_normalization:
-            #     layer = BatchNormalization(name=name+'_bn')(layer)
-            #layer = Activation('relu', name=name+'_actrelu')(layer)
-
             # BN before activation
             if batch_normalization:
                 layer = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(layer)
-            layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
+            #layer = LeakyReLU(alpha=0.2, name=name + '_actleakyrelu')(layer)
+            layer = Activation('relu', name=name + '_relu')(layer)
             return layer
 
 
@@ -227,7 +224,8 @@ class GANUnetModel64():
             d = Conv3D(filters, kernel_size=f_size, strides=1, padding='same', name=name+'_conv3d')(layer_input)
             if bn:
                 d = BatchNormalization(momentum=0.8, name=name+'_bn', scale=scale)(d)
-            d = LeakyReLU(alpha=0.2, name=name + '_leakyrelu')(d)
+            #d = LeakyReLU(alpha=0.2, name=name + '_leakyrelu')(d)
+            d= Activation('relu',name=name + '_relu' )(d)
             return d
 
         img_A = Input(shape=self.input_shape_d, name='input_img_A')             # 24x24x24 warped_img or reference
@@ -337,12 +335,12 @@ class GANUnetModel64():
         #   ... summing over the rows ...
         gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
         # #   ... and sqrt
-        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # # compute lambda * (1 - ||grad||)^2 still for each single sample
         # #gradient_penalty = K.square(1 - gradient_l2_norm)
         # # return the mean as loss over all the batch samples
-        return K.mean(gradient_l2_norm) + lr
-        #return gradients_sqr_sum + lr
+        #return K.mean(gradient_l2_norm) + lr
+        return gradients_sqr_sum + lr
 
 
     """
@@ -478,7 +476,7 @@ class GANUnetModel64():
         # imgs_S = imgs_S * imgs_T_mask
 
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
-        #predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
+        predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
         input_sz = (64, 64, 64)
         step = (24, 24, 24)
@@ -504,16 +502,16 @@ class GANUnetModel64():
                     predict_img[row + gap[0]:row + gap[0] + step[0],
                                 col + gap[1]:col + gap[1] + step[1],
                                 vol + gap[2]:vol + gap[2] + step[2]] = patch_predict_warped[0, :, :, :, 0]
-                    #predict_phi[row + gap[0]:row + gap[0] + step[0],
-                    #            col + gap[1]:col + gap[1] + step[1],
-                    #            vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
+                    predict_phi[row + gap[0]:row + gap[0] + step[0],
+                               col + gap[1]:col + gap[1] + step[1],
+                               vol + gap[2]:vol + gap[2] + step[2],:] = patch_predict_phi[0, :, :, :, :]
 
                     #predict_img[row :row + input_sz[0], col :col + input_sz[1], : ] = patch_predict_warped[0, :, :, :, 0]
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
         nrrd.write(path+"generated_ganunet_withref/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
-        # self.data_loader._write_nifti(path+"generated_v1_2/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
+        self.data_loader._write_nifti(path+"generated_ganunet_withref/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         file_name = 'gan_network'+ str(epoch)
         # save the whole network
@@ -525,14 +523,14 @@ class GANUnetModel64():
         gan.combined.save_weights(path+ 'generated_ganunet_withref/'+file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
-        # save the generator network
-        gan.generator.save(path+ 'generated_ganunet_withref/'+file_name + '.gen.h5', overwrite=True)
-        print('Save the generator network to disk as a .whole.h5 file')
-        model_jason = gan.generator.to_json()
-        with open(path+ 'generated_ganunet_withref/'+file_name + '_gen_arch.json', 'w') as json_file:
-            json_file.write(model_jason)
-        gan.generator.save_weights(path+ 'generated_ganunet_withref/'+file_name + '_gen_weights.h5', overwrite=True)
-        print('Save the generator architecture in .json file and weights in .h5 file')
+        # # save the generator network
+        # gan.generator.save(path+ 'generated_ganunet_withref/'+file_name + '.gen.h5', overwrite=True)
+        # print('Save the generator network to disk as a .whole.h5 file')
+        # model_jason = gan.generator.to_json()
+        # with open(path+ 'generated_ganunet_withref/'+file_name + '_gen_arch.json', 'w') as json_file:
+        #     json_file.write(model_jason)
+        # gan.generator.save_weights(path+ 'generated_ganunet_withref/'+file_name + '_gen_weights.h5', overwrite=True)
+        # print('Save the generator architecture in .json file and weights in .h5 file')
 
 
 if __name__ == '__main__':
