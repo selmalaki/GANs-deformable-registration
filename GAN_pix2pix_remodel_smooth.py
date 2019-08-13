@@ -230,12 +230,12 @@ class GAN_pix2pix():
         #   ... summing over the rows ...
         gradients_sqr_sum = K.sum(gradients_sqr, axis=np.arange(1, len(gradients_sqr.shape)))
         # #   ... and sqrt
-        gradient_l2_norm = K.sqrt(gradients_sqr_sum)
+        #gradient_l2_norm = K.sqrt(gradients_sqr_sum)
         # # compute lambda * (1 - ||grad||)^2 still for each single sample
         #gradient_penalty = K.square(1 - gradient_l2_norm)
         # # return the mean as loss over all the batch samples
-        return K.mean(gradient_l2_norm) + mse_loss
-        #return K.mean(gradients_sqr_sum) + mse_loss
+        #return K.mean(gradient_l2_norm) + mse_loss
+        return K.mean(gradients_sqr_sum) + mse_loss
         #return K.mean(gradient_penalty) + mse_loss
     """
     Training
