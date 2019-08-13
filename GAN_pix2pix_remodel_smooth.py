@@ -56,10 +56,10 @@ class GAN_pix2pix():
         self.gf = 32
         self.df = 32
 
-        #optimizer = Adam(0.001, 0.5)
+        optimizer = Adam(0.001, 0.5)
         #optimizer = SGD(lr=0.001, decay=1e-6, momentum=0.9,
         #                  nesterov=True)
-        optimizer = Adam(0.0002, 0.5)
+        #optimizer = Adam(0.0002, 0.5)
 
         # Build and compile the discriminator
         self.discriminator = self.build_discriminator()
@@ -107,7 +107,7 @@ class GAN_pix2pix():
 
 
         if self.DEBUG:
-            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix_remod_golden_smooth/'
+            log_path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/logs_ganpix2pix_remod_smooth/'
             self.callback = TensorBoard(log_path)
             self.callback.set_model(self.combined)
 
@@ -243,7 +243,7 @@ class GAN_pix2pix():
     def train(self, epochs, batch_size=1, sample_interval=50):
         DEBUG =1
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_pix2pix/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pix_remod_smooth/' , exist_ok=True)
         output_sz = 128
         input_sz = 256
         gap = int((input_sz - output_sz)/2)
@@ -266,8 +266,7 @@ class GAN_pix2pix():
                 perturbation_factor_alpha = 0.1 if epoch > epochs/2 else 0.2
                 batch_ref = perturbation_factor_alpha * batch_img + (1- perturbation_factor_alpha) * batch_img_template
                 # use noisy targets to get the GAN out of any local minima (mode collapse)
-                noisy_prob = 1 - np.sqrt(
-                    1 - np.random.random())  # peak near low values and falling off towards high values
+                noisy_prob = 1 - np.sqrt(1 - np.random.random())  # peak near low values and falling off towards high values
                 if noisy_prob < 0.85:  # occasionally flip labels to introduce noisy labels
                     d_loss_real = self.discriminator.train_on_batch([batch_img_golden, batch_img_template], valid)
                     d_loss_fake = self.discriminator.train_on_batch([transform, batch_img_template], fake)
@@ -318,7 +317,7 @@ class GAN_pix2pix():
 
     def sample_images(self, epoch, batch_i):
         path = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
-        os.makedirs(path+'generated_pix2pix_remod_golden_smooth/' , exist_ok=True)
+        os.makedirs(path+'generated_pix2pix_remod_smooth/' , exist_ok=True)
 
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
@@ -328,7 +327,7 @@ class GAN_pix2pix():
 
         input_sz = self.crop_size
         output_sz = (self.output_size, self.output_size, self.output_size)
-        step = (64, 64, 64)
+        step = (48, 48, 48)
 
         gap = (int((input_sz[0] - output_sz[0]) / 2), int((input_sz[1] - output_sz[1]) / 2), int((input_sz[2] - output_sz[2]) / 2))
         start_time = datetime.datetime.now()
@@ -361,18 +360,18 @@ class GAN_pix2pix():
         elapsed_time = datetime.datetime.now() - start_time
         print(" --- Prediction time: %s" % (elapsed_time))
 
-        nrrd.write(path+"generated_pix2pix_remod_golden_smooth/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
-        self.data_loader._write_nifti(path + "generated_pix2pix_remod_golden_smooth/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
+        nrrd.write(path+"generated_pix2pix_remod_smooth/%d_%d_%d" % (epoch, batch_i, idx), predict_img)
+        self.data_loader._write_nifti(path + "generated_pix2pix_remod_smooth/phi%d_%d_%d" % (epoch, batch_i, idx), predict_phi)
 
         if epoch%10 == 0:
             file_name = 'gan_network' +str(epoch)
             # save the whole network
-            gan.combined.save(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '.whole.h5', overwrite=True)
+            gan.combined.save(path+'generated_pix2pix_remod_smooth/'+file_name + '.whole.h5', overwrite=True)
             print('Save the whole network to disk as a .whole.h5 file')
             model_jason = gan.combined.to_json()
-            with open(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '_arch.json', 'w') as json_file:
+            with open(path+'generated_pix2pix_remod_smooth/'+file_name + '_arch.json', 'w') as json_file:
                 json_file.write(model_jason)
-            gan.combined.save_weights(path+'generated_pix2pix_remod_golden_smooth/'+file_name + '_weights.h5', overwrite=True)
+            gan.combined.save_weights(path+'generated_pix2pix_remod_smooth/'+file_name + '_weights.h5', overwrite=True)
             print('Save the network architecture in .json file and weights in .h5 file')
 
             # # save the generator network
