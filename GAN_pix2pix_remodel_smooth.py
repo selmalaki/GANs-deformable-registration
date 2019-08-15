@@ -53,8 +53,8 @@ class GAN_pix2pix():
         self.output_shape_d = (patch, patch, patch,  self.channels)
 
         # Number of filters in the first layer of G and D
-        self.gf = 32
-        self.df = 32
+        self.gf = 16
+        self.df = 16
 
         optimizer = Adam(0.001, 0.5)
         #optimizer = SGD(lr=0.001, decay=1e-6, momentum=0.9,
@@ -102,7 +102,7 @@ class GAN_pix2pix():
 
 
         self.combined.compile(loss=[partial_gp_loss, 'mae'],
-                              loss_weights=[1, 100],
+                              loss_weights=[50, 50],
                               optimizer=optimizer)
 
 
