@@ -27,7 +27,8 @@ class DataLoader():
                  min_max = False,
                  restricted_mask=False,
                  use_golden=False,
-                 use_sharpen=False):
+                 use_sharpen=False,
+                 use_phi=False):
         """
         :param batch_sz: int - size of the batch
         :param sampletype: string - 'fly' or 'fish'
@@ -43,16 +44,21 @@ class DataLoader():
         self.imgs_test = []
         self.masks_test = []
 
+        self.phis = []
+
         self.use_golden = use_golden
         self.use_sharpen = use_sharpen
+        self.use_phi = use_phi
+
 
         if dataset_name is 'fly':
-            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.golden_imgs, self.n_batches = self.prepare_fly_data(batch_sz,
+            self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.golden_imgs, self.n_batches, self.phis = self.prepare_fly_data(batch_sz,
                                                                                                                                                                     use_hist_equilized_data,
                                                                                                                                                                     min_max,
                                                                                                                                                                     restricted_mask,
                                                                                                                                                                     use_golden,
-                                                                                                                                                                    use_sharpen)
+                                                                                                                                                                    use_sharpen,
+                                                                                                                                                                    use_phi)
         elif dataset_name is 'fish':
             self.imgs, self.masks, self.img_template, self.mask_template, self.imgs_test, self.masks_test, self.n_batches = self.prepare_fish_data(batch_sz)
         elif dataset_name is 'toy':
@@ -163,7 +169,8 @@ class DataLoader():
                          min_max=False,
                          restricted_mask=False,
                          use_golden=False,
-                         use_sharpen=False):
+                         use_sharpen=False,
+                         use_phi=False):
 
         self.batch_sz = batch_sz
         self.n_gpus = 1
@@ -179,6 +186,8 @@ class DataLoader():
 
         imgs_test = []
         masks_test = []
+
+        phis = []
 
         filepath = '/nrs/scicompsoft/elmalakis/GAN_Registration_Data/flydata/forSalma/lo_res/'
         goldenfilepath = '/nrs/saalfeld/john/public/forSalma/lo_res/proc/'
@@ -317,17 +326,33 @@ class DataLoader():
                       # filepath + 'preprocessed_convexhull/' +'20170301_31_B5_Scope_1_C1_down_result_sharp_diff.nrrd'
                    ]
 
-        segmented = filepath + 'generated_v1_2/train_segmented/'
+        true_phi = [goldenfilepath + '20161102_32_C1_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161102_32_C3_Scope_4_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161102_32_D1_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161102_32_D2_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161102_32_E1_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161102_32_E3_Scope_4_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161220_31_I1_Scope_2_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161220_31_I2_Scope_6_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161220_31_I3_Scope_6_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161220_32_C1_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20161220_32_C3_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_A2_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_A3_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_A6_Scope_2_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_E1_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_E2_Scope_3_C1_down/deformationField_noAffine.nrrd',
+                   goldenfilepath + '20170223_32_E3_Scope_3_C1_down/deformationField_noAffine.nrrd'
+                   #goldenfilepath + '20170301_31_B1_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   #goldenfilepath + '20170301_31_B3_Scope_1_C1_down/deformationField_noAffine.nrrd',
+                   #goldenfilepath + '20170301_31_B5_Scope_1_C1_down/deformationField_noAffine.nrrd'
+                   ]
 
-        # Template Preparation
 
+        # --- Template Preparation ---
         # The original template
         img_template, templ_header = nrrd.read(filepath + 'JRC2018_lo.nrrd')
         mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/JRC2018_lo_dilated_mask.nrrd')
-
-        # Use one of the training data as a template
-        #img_template, templ_header = nrrd.read(filepath + 'proc/' + '20170223_32_A3_Scope_3_C1_down_result.nrrd')
-        #mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
 
         # Use the sharpened version as a template
         if use_sharpen:
@@ -346,10 +371,6 @@ class DataLoader():
         if min_max:
             img_template = (2 * (img_template - np.min(img_template_masked)) / (
                     np.max(img_template_masked) - np.min(img_template_masked))) - 1
-
-        # nrrd.write(filepath + '20170223_32_A3_Scope_3_C1_down_result_undermask.nrrd', img_template,
-        #            header=templ_header)
-
 
         if use_golden:
 
@@ -374,10 +395,6 @@ class DataLoader():
             #mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/' + 'JRC2018_lo_dilated_mask.nrrd')
             #if restricted_mask:
             #    mask_template, templ_header = nrrd.read(filepath + 'JRC2018_lo_mask_restricted.nrrd')
-
-            # For testing use template from the actual dataset (20170223_32_A3_Scope_3_C1_down_result)
-            #img_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/' +'20170223_32_A3_Scope_3_C1_down_result_histogram_normalized.nrrd')
-            #mask_template, templ_header = nrrd.read(filepath + 'preprocessed_convexhull/' +'20170223_32_A3_Scope_3_C1_down_result_dilated_mask.nrrd')
 
             img_template = np.float32(img_template)
             #mask_template = np.float32(mask_template)
@@ -405,11 +422,6 @@ class DataLoader():
                 if min_max:
                     curr_img = (2 * (curr_img - np.min(img_masked)) / (np.max(img_masked) - np.min(img_masked))) - 1
 
-                # Just use the template mask
-                # masks 1: interesting value, 0: not interesting value
-                #curr_mask, mask_header = nrrd.read(mask_pp[i])
-                #curr_mask = np.float32(curr_mask)
-                #masks.append(curr_mask)
                 imgs.append(curr_img)
 
 
@@ -449,12 +461,15 @@ class DataLoader():
                 # image normalization
                 if min_max:
                     curr_img = (2* (curr_img - np.min(img_masked))/(np.max(img_masked)-np.min(img_masked))) -1
-                # masks 1: interesting value, 0: not interesting value
-                #curr_mask, mask_header = nrrd.read(mask_pp[i])
-                #curr_mask = np.float32(curr_mask)
-                #masks.append(curr_mask)
+
                 imgs.append(curr_img)
 
+        if use_phi:
+            print('---- load true phi -----')
+            for iphi in true_phi:
+                curr_phi, phi_header = nrrd.read(iphi)
+                curr_phi = np.float32(curr_phi)
+                phis.append(curr_phi)
 
 
         # TODO: save test images
@@ -469,7 +484,7 @@ class DataLoader():
 
         n_batches = int((len(imgs) * img_template.shape[0] / self.crop_sz[0]) / self.batch_sz)
 
-        return imgs, masks, img_template, mask_template, imgs_test, masks_test, golden_imgs, n_batches
+        return imgs, masks, img_template, mask_template, imgs_test, masks_test, golden_imgs, n_batches, phis
 
 
     def prepare_toy_data(self, batch_sz):
