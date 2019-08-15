@@ -69,7 +69,7 @@ class CycleGAN_model64():
         self.lambda_cycle = 10.0                    # Cycle-consistency loss
         self.lambda_id = 0.1 * self.lambda_cycle    # Identity loss
 
-        optimizer = Adam(0.001, 0.5)
+        optimizer = Adam(0.0002, 0.5)
 
         # Build and compile the discriminators
         self.d_A = self.build_discriminator()
@@ -166,7 +166,6 @@ class CycleGAN_model64():
 
         u4 = UpSampling3D(size=2)(u3)
         output_img = Conv3D(self.channels, kernel_size=4, strides=1, padding='same', activation='tanh')(u4)
-        #output_img = Conv3D(self.channels, kernel_size=1, strides=1, padding='valid', activation='tanh')(u4)
 
         return Model(d0, output_img)
 
@@ -204,10 +203,6 @@ class CycleGAN_model64():
                 # ----------------------
                 #  Train Discriminators
                 # ----------------------
-                # Create a ref image by perturbing th subject image with the template image
-                # perturbation_factor_alpha = 0.1 if epoch > epochs / 2 else 0.2
-                # batch_ref = perturbation_factor_alpha * batch_img + (1 - perturbation_factor_alpha) * batch_img_template
-
                 # Translate images to opposite domain
                 fake_B = self.g_AB.predict(batch_img)
                 fake_A = self.g_BA.predict(batch_img_template)
@@ -223,7 +218,6 @@ class CycleGAN_model64():
 
                 # Total disciminator loss
                 d_loss = 0.5 * np.add(dA_loss, dB_loss)
-
 
                 # ------------------
                 #  Train Generators
@@ -290,24 +284,6 @@ class CycleGAN_model64():
 
         idx, img_S = self.data_loader.load_data(is_validation=True)
         img_T = self.data_loader.img_template
-        # img_T_mask = self.data_loader.mask_template
-
-        #img_S = img_S * img_S_mask   # img_A
-        #img_T = img_T * img_T_mask   # img_B
-
-        # img_S_mask = 1-img_S_mask # flip the mask to use np.ma.array
-        # img_T_mask = 1-img_T_mask # flip the mask to use np.ma.array
-        #
-        # img_S_mask = np.uint8(img_S_mask)
-        # img_S_masked = np.ma.array(img_S, mask=img_S_mask)
-        # img_S = (img_S - img_S_masked.mean()) / img_S_masked.std()
-        #
-        # img_T_mask = np.uint8(img_T_mask)
-        # img_T_masked = np.ma.array(img_T, mask=img_T_mask)
-        # img_T = (img_T - img_T_masked.mean()) / img_T_masked.std()
-
-        # nrrd.write(path + "generated_cyclegan/originalS_%d_%d_%d" % (epoch, batch_i, idx), img_S)
-        # nrrd.write(path + "generated_cyclegan/originalT_%d_%d" % (epoch, batch_i), img_T)
 
         predict_img = np.zeros(img_S.shape, dtype=img_S.dtype)
         predict_templ = np.zeros(img_T.shape, dtype=img_T.dtype)
@@ -360,14 +336,14 @@ class CycleGAN_model64():
         gan.combined.save_weights(path+'generated_cyclegan/' + file_name + '_weights.h5', overwrite=True)
         print('Save the network architecture in .json file and weights in .h5 file')
 
-        # save the generator network the translation one
-        gan.g_AB.save(path+'generated_cyclegan/' + file_name + '.gen.h5', overwrite=True)
-        print('Save the generator network to disk as a .whole.h5 file')
-        model_jason = gan.generator.to_json()
-        with open(path+'generated_cyclegan/' + file_name + '_gen_arch.json', 'w') as json_file:
-            json_file.write(model_jason)
-        gan.generator.save_weights(path+'generated_cyclegan/' + file_name + '_gen_weights.h5', overwrite=True)
-        print('Save the generator architecture in .json file and weights in .h5 file')
+        # # save the generator network the translation one
+        # gan.g_AB.save(path+'generated_cyclegan/' + file_name + '.gen.h5', overwrite=True)
+        # print('Save the generator network to disk as a .whole.h5 file')
+        # model_jason = gan.generator.to_json()
+        # with open(path+'generated_cyclegan/' + file_name + '_gen_arch.json', 'w') as json_file:
+        #     json_file.write(model_jason)
+        # gan.generator.save_weights(path+'generated_cyclegan/' + file_name + '_gen_weights.h5', overwrite=True)
+        # print('Save the generator architecture in .json file and weights in .h5 file')
 
 
 
