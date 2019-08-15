@@ -242,7 +242,7 @@ class GAN_pix2pix():
                 # Train the generator
 
                 g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_ref]) # The original implemntation has batch_img in the output
-                g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])  # The original implemntation has batch_img in the output
+                #g_loss = self.combined.train_on_batch([batch_img, batch_img_template], [valid, batch_img_golden])  # The original implemntation has batch_img in the output
                 elapsed_time = datetime.datetime.now() - start_time
 
                 print(
