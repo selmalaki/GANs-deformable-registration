@@ -471,10 +471,6 @@ class GANUnetModel64():
         idx, imgs_S = self.data_loader.load_data(is_validation=True)
         imgs_T = self.data_loader.img_template
 
-        # Mask the image with the template mask # already done in the preparing phase
-        # imgs_T_mask = self.data_loader.mask_template
-        # imgs_S = imgs_S * imgs_T_mask
-
         predict_img = np.zeros(imgs_S.shape, dtype=imgs_S.dtype)
         predict_phi = np.zeros(imgs_S.shape + (3,), dtype=imgs_S.dtype)
 
